@@ -1,0 +1,48 @@
+# config/config.yaml
+
+# Path to the directory containing your raw sequencing data
+SAMPLES: "/path/to/your/samples"
+
+# Path to the directory where results will be stored
+RESULTS_FOLDER: "/path/to/your/results"
+
+# Number of threads to use for multi-threaded tools
+THREADS: 8
+
+# Whether to clean up intermediate files after the pipeline finishes
+# Set to "TRUE" or "FALSE"
+CLEAN: "FALSE"
+
+# Path to the BWA index for the human genome (used for contamination removal)
+HUMAN_INDEX: "/path/to/human/genome/index"
+
+# Path to the Kaiju database directory
+KAIJU_DB: "/path/to/kaiju/database"
+
+# Path to the Kraken2 database
+KRAKEN_DB: "/path/to/kraken2/database"
+
+# Path to the BLASTN nucleotide database
+BLASTN_DB: "/path/to/blastn/database"
+
+# Minimum contig length to keep after assembly
+CONTIG_LENGTH: 1000
+
+# Path to the CheckV database
+CHECKV_DB: "/path/to/checkv/database"
+
+# Path to the Parquet file containing viral sequences (used for coverage plots)
+VIRUS_PARQUET: "/path/to/virus_sequences.parquet"
+
+# Coverage threshold for generating coverage plots
+PLOT_THRESHOLD: 10
+
+# Number of top references to include in coverage plots
+NUMBER_OF_PLOTS: 10
+
+# Optional: Path to the BWA index for a secondary host genome (e.g., mouse)
+# If not using a secondary host, comment out or remove these lines
+# SECONDARY_HOST_INDEX: "/path/to/secondary/host/genome/index"
+# SECONDARY_HOST_NAME: "Mouse"
+
+# End of config.yaml

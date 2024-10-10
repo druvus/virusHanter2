@@ -1,0 +1,19 @@
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python
+  - pandas
+  - numpy
+  - pyfastx
+  - janitor
+  - seaborn
+  - matplotlib
+  - panel
+  - altair
+  - beautifulsoup4
+  - lxml
+  - pyyaml
+  - pyarrow
+  - scikit-learn
+  - bokeh
