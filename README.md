@@ -1,11 +1,11 @@
 
-# Virushanter: A Snakemake Pipeline for Viral Metagenomics Analysis
+# Virushanter2: A Snakemake Pipeline for Viral Metagenomics Analysis
 
 ![Virushanter Logo](resources/logo.png)
 
 ## Overview
 
-**Virushanter** is a scalable and reproducible bioinformatics pipeline designed for the analysis of viral metagenomic sequencing data. Built using [Snakemake](https://snakemake.readthedocs.io/en/stable/), the pipeline performs quality control, host contamination removal, taxonomic classification, assembly, annotation, and report generation.
+**Virushanter2** is a scalable and reproducible bioinformatics pipeline designed for the analysis of viral metagenomic sequencing data. Built using [Snakemake](https://snakemake.readthedocs.io/en/stable/), the pipeline performs quality control, host contamination removal, taxonomic classification, assembly, annotation, and report generation.
 
 ## Features
 
