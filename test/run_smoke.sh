@@ -63,11 +63,25 @@ run_full() {
         [[ -s "$run_csv"  ]] || { echo "[smoke] FAIL: missing $run_csv";  exit 1; }
         echo "[smoke] OK: $html, $run_csv"
     else
-        echo "[smoke] CheckV DB is stubbed; running up to BLASTN only"
-        snakemake --sdm conda --cores 2 --configfile "$CONFIG" --until blastn
-        local blastn="test/results/test/test_R/BLASTN/test_R.contigs.blastn.csv"
-        [[ -s "$blastn" ]] || { echo "[smoke] FAIL: missing $blastn"; exit 1; }
-        echo "[smoke] OK: $blastn"
+        echo "[smoke] CheckV DB is stubbed; running everything that doesn't depend on CheckV"
+        # Three terminal rules whose combined dependencies cover the
+        # assembly branch, the classification branch, and the coverage
+        # branch. CheckV / merge_checkv_blastn / generate_report /
+        # aggregate_run_information stay out of this set.
+        snakemake --sdm conda --cores 2 --configfile "$CONFIG" \
+            --until blastn bam2plot kaiju_to_table
+        local sd="test/results/test/test_R"
+        local expected=(
+            "$sd/BLASTN/test_R.contigs.blastn.csv"
+            "$sd/KAIJU/test_R.kaiju.table.tsv"
+            "$sd/KRAKEN/test_R.kraken.csv"
+            "$sd/COVERAGE_PLOTS"
+        )
+        for f in "${expected[@]}"; do
+            [[ -e "$f" ]] || { echo "[smoke] FAIL: missing $f"; exit 1; }
+        done
+        echo "[smoke] OK:"
+        for f in "${expected[@]}"; do echo "  - $f"; done
         echo "[smoke] (HTML report stage skipped; provide a real CheckV DB to enable it.)"
     fi
 }

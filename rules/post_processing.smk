@@ -64,7 +64,7 @@ rule bam2plot:
     input:
         bam=rules.bwa_align_to_kraken_hits.output.bam,
     output:
-        coverage_plots_dir=f"{RESULT_FOLDER}/{{sample}}/COVERAGE_PLOTS",
+        coverage_plots_dir=directory(f"{RESULT_FOLDER}/{{sample}}/COVERAGE_PLOTS"),
     params:
         threshold=PLOT_THRESHOLD,
         num_refs=NUMBER_OF_PLOTS,
