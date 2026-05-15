@@ -1,8 +1,8 @@
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
-  - pilon=1.24
-  - bwa=0.7.17
-  - samtools=1.18
-  - openjdk=17
+  - pilon>=1.24
+  - bwa>=0.7.17
+  - samtools>=1.18
+  - openjdk>=17

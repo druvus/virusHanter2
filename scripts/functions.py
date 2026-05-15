@@ -102,14 +102,20 @@ def kaiju_db_files(kaiju_db: str) -> tuple:
 
 
 def fastx_file_to_df(fastx_file: str) -> pd.DataFrame:
-    """Read a FASTA/FASTQ file into a DataFrame sorted by sequence length."""
+    """Read a FASTA/FASTQ file into a DataFrame sorted by sequence length.
+
+    pyfastx 2.x yields tuples from `Fastx`; the first two fields are
+    (name, sequence). Earlier versions returned attribute-bearing objects;
+    callers in the original virusHanter targeted that older API.
+    """
     fastx = pyfastx.Fastx(fastx_file)
-    reads = list(zip(*[(entry.name, entry.sequence) for entry in fastx]))
-    if not reads:
+    rows = [(record[0], record[1]) for record in fastx]
+    if not rows:
         return pd.DataFrame(columns=["name", "sequence", "read_len"])
 
+    names, seqs = zip(*rows)
     return (
-        pd.DataFrame({"name": reads[0], "sequence": reads[1]})
+        pd.DataFrame({"name": list(names), "sequence": list(seqs)})
         .assign(read_len=lambda x: x.sequence.str.len())
         .sort_values("read_len", ascending=False)
     )

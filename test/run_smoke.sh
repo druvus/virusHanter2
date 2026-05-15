@@ -21,6 +21,14 @@ cd "$(dirname "$0")/.."
 CONFIG="test/config.test.yaml"
 MINI="test/mini_db"
 
+# Many bioconda packages (bwa, samtools, etc.) do not ship an osx-arm64
+# build. On Apple Silicon, fall back to osx-64 binaries via Rosetta by
+# pinning CONDA_SUBDIR before any env is materialised. No-op on Linux.
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    export CONDA_SUBDIR="${CONDA_SUBDIR:-osx-64}"
+    echo "[smoke] Apple Silicon detected; using CONDA_SUBDIR=$CONDA_SUBDIR"
+fi
+
 build_if_requested() {
     if [[ "$1" == "1" ]] || [[ ! -d "$MINI/human" ]]; then
         echo "[smoke] (re)building mini fixtures"

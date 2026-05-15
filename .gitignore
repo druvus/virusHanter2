@@ -164,3 +164,8 @@ cython_debug/
 # Snakemake
 .snakemake/
 test/results/
+
+# Synthesized smoke fixtures (built by test/run_smoke.sh --build)
+test/mini_db/
+test/test_R1.fastq
+test/test_R2.fastq

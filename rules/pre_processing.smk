@@ -31,7 +31,7 @@ rule fastp:
         f"{RESULT_FOLDER}/{{sample}}/logs/fastp.log"
     threads: THREADS
     conda:
-        "envs/fastp.yaml"
+        "../envs/fastp.yaml"
     shell:
         """
         fastp \
@@ -59,7 +59,7 @@ rule bwa_human:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_human.log"
     threads: THREADS
     conda:
-        "envs/bwa.yaml"
+        "../envs/bwa.yaml"
     shell:
         """
         bwa mem -t {threads} {params.index} {input.r1} {input.r2} | samtools sort -o {output.mapped_bam} - > {log} 2>&1
@@ -75,7 +75,7 @@ rule remove_host:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/remove_host.log"
     conda:
-        "envs/samtools.yaml"
+        "../envs/samtools.yaml"
     shell:
         """
         samtools flagstat {input.mapped_bam} > {output.flagstat}
@@ -92,7 +92,7 @@ rule bam_to_fastq_human:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bam_to_fastq_human.log"
     conda:
-        "envs/samtools.yaml"
+        "../envs/samtools.yaml"
     shell:
         """
         samtools fastq -1 {output.r1} -2 {output.r2} {input.unmapped_bam} > {log} 2>&1
@@ -111,7 +111,7 @@ rule bwa_secondary_host:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_secondary.log"
     threads: THREADS
     conda:
-        "envs/bwa.yaml"
+        "../envs/bwa.yaml"
     shell:
         """
         if [ "{params.is_secondary_host}" = "True" ]; then
@@ -135,7 +135,7 @@ rule remove_secondary_host:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/remove_secondary_host.log"
     conda:
-        "envs/samtools.yaml"
+        "../envs/samtools.yaml"
     shell:
         """
         if [ "{params.is_secondary_host}" = "True" ]; then
@@ -159,7 +159,7 @@ rule bam_to_fastq_secondary:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bam_to_fastq_secondary.log"
     conda:
-        "envs/samtools.yaml"
+        "../envs/samtools.yaml"
     shell:
         """
         samtools fastq -1 {output.r1} -2 {output.r2} {input.unmapped_bam} > {log} 2>&1

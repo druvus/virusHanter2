@@ -29,7 +29,7 @@ rule bwa_align_to_kraken_hits:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_kraken.log"
     conda:
-        "envs/bwa.yaml"
+        "../envs/bwa.yaml"
     run:
         import pandas as pd
         from pathlib import Path
@@ -71,7 +71,7 @@ rule bam2plot:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bam2plot.log"
     conda:
-        "envs/bam2plot.yaml"
+        "../envs/bam2plot.yaml"
     shell:
         """
         mkdir -p {output.coverage_plots_dir}

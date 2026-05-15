@@ -17,6 +17,7 @@ CONTIG_LENGTH = config.get("CONTIG_LENGTH", 500)
 BLASTN_DB = config["BLASTN_DB"]
 CHECKV_DB = config["CHECKV_DB"]
 PILON_MEM = config.get("PILON_MEM", "50G")
+PILON_MEM_MB = int(PILON_MEM.rstrip("Gg")) * 1024
 
 
 # Rule: De novo assembly with MEGAHIT
@@ -35,7 +36,7 @@ rule megahit:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/megahit.log",
     conda:
-        "envs/megahit.yaml"
+        "../envs/megahit.yaml"
     run:
         # MEGAHIT refuses to run if the output directory already exists.
         shell("rm -rf {params.out_dir}")
@@ -74,14 +75,14 @@ rule pilon:
         pilon_mem=PILON_MEM,
     threads: THREADS
     resources:
-        # mem_mb is derived from PILON_MEM so the scheduler and the JVM Xmx
-        # flag stay in lockstep when PILON_MEM is tuned.
-        mem_mb=lambda wildcards, params: int(params.pilon_mem.rstrip("Gg")) * 1024,
+        # PILON_MEM_MB is derived from PILON_MEM at workflow-parse time so the
+        # scheduler and the JVM Xmx flag stay in lockstep.
+        mem_mb=PILON_MEM_MB,
         runtime=240,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/pilon.log",
     conda:
-        "envs/pilon.yaml"
+        "../envs/pilon.yaml"
     run:
         # Rebuild a temporary BWA index of the assembly.
         shell("rm -rf {params.index_folder}")
@@ -119,7 +120,7 @@ rule wrangle_pilon:
     params:
         min_len=CONTIG_LENGTH,
     conda:
-        "envs/panel.yaml"
+        "../envs/panel.yaml"
     run:
         df = fastx_file_to_df(input.contigs)
         df = df.assign(sample_id=wildcards.sample)
@@ -143,7 +144,7 @@ rule blastn:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/blastn.log",
     conda:
-        "envs/blastn.yaml"
+        "../envs/blastn.yaml"
     run:
         Path(output.blast).parent.mkdir(parents=True, exist_ok=True)
         df = run_blastn(
@@ -174,7 +175,7 @@ rule checkv:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/checkv.log",
     conda:
-        "envs/checkv.yaml"
+        "../envs/checkv.yaml"
     shell:
         """
         checkv contamination \
@@ -198,7 +199,7 @@ rule merge_checkv_blastn:
     output:
         merged_csv=f"{RESULT_FOLDER}/{{sample}}/CHECKV/{{sample}}.merged.csv",
     conda:
-        "envs/panel.yaml"
+        "../envs/panel.yaml"
     run:
         import pandas as pd
 

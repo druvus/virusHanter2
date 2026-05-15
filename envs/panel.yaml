@@ -1,19 +1,11 @@
+# Python deps consumed by the wrangling/parquet rules. The full Panel +
+# Altair stack lives in the driver `virushanter` env (where reporthanter
+# is installed); this env only needs to read/write data frames.
 channels:
-  - bioconda
   - conda-forge
 dependencies:
-  - python=3.11
-  - pandas=2.2.*
-  - numpy=1.26.*
-  - pyfastx=2.1.*
-  - pyjanitor=0.27.*
-  - seaborn=0.13.*
-  - matplotlib=3.8.*
-  - panel=1.4.*
-  - altair=5.*
-  - beautifulsoup4=4.12.*
-  - lxml=5.*
-  - pyyaml=6.*
-  - pyarrow=15.*
-  - scikit-learn=1.4.*
-  - bokeh=3.4.*
+  - python>=3.11
+  - pandas>=2.0
+  - numpy>=1.24
+  - pyfastx>=2.0
+  - pyarrow>=14

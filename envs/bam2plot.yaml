@@ -1,9 +1,9 @@
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
-  - python=3.11
+  - python>=3.11
   - pip
-  - samtools=1.18
+  - samtools>=1.18
   - pip:
       - bam2plot

@@ -41,7 +41,7 @@ rule kaiju:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/kaiju.log"
     conda:
-        "envs/kaiju.yaml"
+        "../envs/kaiju.yaml"
     shell:
         """
         kaiju \
@@ -63,7 +63,7 @@ rule kaiju_to_table:
     output:
         kaiju_table=f"{RESULT_FOLDER}/{{sample}}/KAIJU/{{sample}}.kaiju.table.tsv",
     conda:
-        "envs/kaiju.yaml"
+        "../envs/kaiju.yaml"
     shell:
         """
         kaiju2table \
@@ -91,7 +91,7 @@ rule kraken:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/kraken.log"
     conda:
-        "envs/kraken.yaml"
+        "../envs/kraken.yaml"
     shell:
         """
         kraken2 \
@@ -112,7 +112,7 @@ rule wrangle_kraken:
     output:
         kraken_csv=f"{RESULT_FOLDER}/{{sample}}/KRAKEN/{{sample}}.kraken.csv",
     conda:
-        "envs/panel.yaml"
+        "../envs/panel.yaml"
     run:
         df = wrangle_kraken(input.kraken_report)
         df.to_csv(output.kraken_csv, index=False)
