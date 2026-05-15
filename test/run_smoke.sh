@@ -24,9 +24,13 @@ MINI="test/mini_db"
 # Many bioconda packages (bwa, samtools, etc.) do not ship an osx-arm64
 # build. On Apple Silicon, fall back to osx-64 binaries via Rosetta by
 # pinning CONDA_SUBDIR before any env is materialised. No-op on Linux.
+APPLE_SILICON=0
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     export CONDA_SUBDIR="${CONDA_SUBDIR:-osx-64}"
+    APPLE_SILICON=1
     echo "[smoke] Apple Silicon detected; using CONDA_SUBDIR=$CONDA_SUBDIR"
+    echo "[smoke] (bam2plot/polars >= 1.40 segfaults under Rosetta;"
+    echo "[smoke]  the --full path will stop at merge_checkv_blastn on this host.)"
 fi
 
 build_if_requested() {
@@ -57,7 +61,7 @@ run_full() {
         checkv_ready=1
     fi
 
-    if [[ "$checkv_ready" == "1" ]]; then
+    if [[ "$checkv_ready" == "1" && "$APPLE_SILICON" == "0" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"
         snakemake --sdm conda --cores 2 --configfile "$CONFIG"
         local sample_dir="test/results/test"
@@ -66,6 +70,15 @@ run_full() {
         [[ -s "$html"     ]] || { echo "[smoke] FAIL: missing $html";     exit 1; }
         [[ -s "$run_csv"  ]] || { echo "[smoke] FAIL: missing $run_csv";  exit 1; }
         echo "[smoke] OK: $html, $run_csv"
+    elif [[ "$checkv_ready" == "1" && "$APPLE_SILICON" == "1" ]]; then
+        echo "[smoke] CheckV DB present, but Apple Silicon / Rosetta blocks bam2plot."
+        echo "[smoke] Running everything that does not need bam2plot."
+        snakemake --sdm conda --cores 2 --configfile "$CONFIG" \
+            --until merge_checkv_blastn kaiju_to_table
+        local merged="test/results/test/test_R/CHECKV/test_R.merged.csv"
+        [[ -s "$merged" ]] || { echo "[smoke] FAIL: missing $merged"; exit 1; }
+        echo "[smoke] OK: $merged"
+        echo "[smoke] (bam2plot + generate_report + aggregate skipped; run on Linux for the HTML report.)"
     else
         echo "[smoke] CheckV DB is stubbed; running everything that doesn't depend on CheckV"
         # Three terminal rules whose combined dependencies cover the
