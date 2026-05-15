@@ -1,17 +1,9 @@
 # post_processing.smk
+#
+# Coverage alignment, report generation (via the reporthanter CLI), run
+# aggregation, and optional cleanup.
 
-# Import custom functions
-from scripts.functions import (
-    read_file_as_blob,
-    parse_bwa_flagstat,
-    parse_fastp,
-    plot_flagstat,
-    plot_kaiju,
-    plot_kraken,
-    plot_blastn,
-    alignment_stats,
-    panel_report,
-)
+from scripts.functions import read_file_as_blob
 
 # Set variables
 THREADS = config["THREADS"]
@@ -57,7 +49,7 @@ rule bwa_align_to_kraken_hits:
 
         # Create BWA index
         index_prefix = params.index_prefix
-        shell("mkdir -p {os.path.dirname(index_prefix)}")
+        Path(index_prefix).parent.mkdir(parents=True, exist_ok=True)
         shell("bwa index -p {index_prefix} {output.virus_fasta} > {log} 2>&1")
 
         # Align reads to viral sequences
@@ -92,33 +84,54 @@ rule bam2plot:
             > {log} 2>&1
         """
 
-# Rule: Generate interactive report
+# Rule: Generate interactive report via the reporthanter CLI
+#
+# The reporthanter package is expected to be installed in the driver conda env
+# (virushanter) that runs Snakemake, so this rule deliberately omits a
+# `conda:` directive.
 rule generate_report:
     input:
         flagstat=rules.remove_host.output.flagstat,
+        secondary_flagstat=rules.remove_secondary_host.output.flagstat,
+        fastp_json=rules.fastp.output.json_report,
         blastn_csv=rules.merge_checkv_blastn.output.merged_csv,
         kraken_csv=rules.wrangle_kraken.output.kraken_csv,
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
+        coverage_dir=rules.bam2plot.output.coverage_plots_dir,
     output:
         report_html=f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html",
     params:
-        result_folder=lambda wildcards: f"{RESULT_FOLDER}/{wildcards.sample}",
-        secondary_host_name=SECONDARY_HOST_NAME,
-    conda:
-        "envs/panel.yaml"
-    run:
-        # Generate the report using the panel_report function
-        report = panel_report(
-            result_folder=params.result_folder,
-            blastn_file=input.blastn_csv,
-            kraken_file=input.kraken_csv,
-            kaiju_table=input.kaiju_table,
-            secondary_host=params.secondary_host_name,
-        )
-        # Save the report as an HTML file
-        report.save(output.report_html, title=f"Report of {wildcards.sample}")
+        secondary_args=(
+            lambda wildcards: (
+                f"--secondary_flagstat_file {RESULT_FOLDER}/{wildcards.sample}/logs/secondary_contamination_flagstat.txt "
+                f"--secondary_host {SECONDARY_HOST_NAME}"
+            )
+            if SECONDARY_HOST_OR_NOT
+            else ""
+        ),
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
+    shell:
+        """
+        reporthanter \
+            --blastn_file {input.blastn_csv} \
+            --kraken_file {input.kraken_csv} \
+            --kaiju_table {input.kaiju_table} \
+            --fastp_json {input.fastp_json} \
+            --flagstat_file {input.flagstat} \
+            --coverage_folder {input.coverage_dir} \
+            --output {output.report_html} \
+            --sample_name {wildcards.sample} \
+            {params.secondary_args} \
+            > {log} 2>&1
+        """
 
 # Rule: Aggregate run information across samples
+#
+# Runs in the driver conda env (virushanter) which has reporthanter + pandas
+# installed, so no per-rule `conda:` directive is needed. Parsing of fastp
+# JSON and BWA flagstat output is delegated to the reportHanter processors to
+# keep a single implementation across the pipeline and the HTML report.
 rule aggregate_run_information:
     input:
         reports=expand(f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html", sample=SAMPLES),
@@ -126,69 +139,86 @@ rule aggregate_run_information:
         run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
     params:
         results_folder=RESULT_FOLDER,
-    conda:
-        "envs/panel.yaml"
+    log:
+        f"{RESULT_FOLDER}/logs/aggregate_run_information.log",
     run:
+        import json
         import pandas as pd
         from pathlib import Path
 
-        def aggregate_sample_info(sample_folder):
-            sample_folder = Path(sample_folder)
+        from reporthanter import FlagstatProcessor
+
+        flagstat_proc = FlagstatProcessor()
+
+        def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
             sample_name = sample_folder.name
 
-            # Read HTML report as blob
-            report_html = read_file_as_blob(sample_folder / "REPORT" / f"{sample_name}.html")
+            # Per-sample HTML, encoded as hex (matches the original virusHanter
+            # run_information_<batch>.csv schema).
+            report_html = read_file_as_blob(
+                sample_folder / "REPORT" / f"{sample_name}.html"
+            )
 
-            # Parse FASTP report
-            fastp_report = next(sample_folder.rglob("FASTP/*.html"), None)
-            fastp_df = parse_fastp(str(fastp_report)) if fastp_report else pd.DataFrame()
+            # fastp summary (JSON) — read directly; only a couple of fields
+            # are needed here, so a full FastpProcessor pass is unnecessary.
+            fastp_json_path = sample_folder / "FASTP" / f"{sample_name}.fastp.json"
+            with open(fastp_json_path) as fh:
+                fastp_summary = json.load(fh).get("summary", {})
+            before = fastp_summary.get("before_filtering", {})
+            read_length = before.get("read1_mean_length", "")
+            number_reads = before.get("total_reads", 0)
 
-            # Extract relevant information
-            sequencing_length = fastp_df.loc[fastp_df['description'] == 'Read1 Length', 'value'].values[0]
-            number_reads = fastp_df.loc[fastp_df['description'] == 'Total Reads', 'value'].values[0]
+            # BWA flagstat against the human host.
+            flagstat_path = sample_folder / "logs" / "human_contamination_flagstat.txt"
+            flagstat_df = flagstat_proc.process(str(flagstat_path))
+            flagstat_lookup = dict(zip(flagstat_df["metric"], flagstat_df["value"]))
+            percent_mapped = flagstat_lookup.get("percent_mapped", 0.0)
 
-            # Parse BWA flagstat
-            flagstat_file = sample_folder / "logs" / "human_contamination_flagstat.txt"
-            total_reads, percent_mapped = parse_bwa_flagstat(str(flagstat_file))
+            # Kraken2 / Kaiju percent-viral summaries.
+            kraken_df = pd.read_csv(
+                sample_folder / "KRAKEN" / f"{sample_name}.kraken.csv"
+            )
+            kraken_virus_percent = kraken_df.loc[
+                kraken_df["domain"] == "Viruses", "percent"
+            ].sum()
 
-            # Read Kraken2 results
-            kraken_csv = sample_folder / "KRAKEN" / f"{sample_name}.kraken.csv"
-            kraken_df = pd.read_csv(kraken_csv)
-            kraken_virus_percent = kraken_df.loc[kraken_df['domain'] == 'Viruses', 'percent'].sum()
+            kaiju_df = pd.read_csv(
+                sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv",
+                sep="\t",
+            )
+            kaiju_virus_percent = float(kaiju_df["percent"].sum())
+            top_virus_kaiju = "||".join(
+                kaiju_df["taxon_name"].head(10).astype(str).tolist()
+            )
 
-            # Read Kaiju results
-            kaiju_table = sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv"
-            kaiju_df = pd.read_csv(kaiju_table, sep='\t')
-            kaiju_virus_percent = kaiju_df['percent'].sum()
-            top_virus_kaiju = '||'.join(kaiju_df['taxon_name'].head(10).tolist())
-
-            # Read BLASTN results
+            # BLASTN summary.
             blastn_csv = sample_folder / "BLASTN" / f"{sample_name}.contigs.blastn.csv"
-            blastn_df = pd.read_csv(blastn_csv)
+            blastn_df = pd.read_csv(blastn_csv) if blastn_csv.exists() else pd.DataFrame()
             number_contigs = len(blastn_df)
-            top_contigs_blastn = '||'.join(blastn_df['match_name'].head(5).tolist())
+            top_contigs_blastn = (
+                "||".join(blastn_df["match_name"].head(5).astype(str).tolist())
+                if "match_name" in blastn_df.columns
+                else ""
+            )
 
-            # Compile sample information
-            sample_info = {
-                'sample_name': sample_name,
-                'read_length': sequencing_length,
-                'number_reads': number_reads,
-                'mapped_to_human_percent': percent_mapped,
-                'kraken_virus_percent': kraken_virus_percent,
-                'kaiju_virus_percent': kaiju_virus_percent,
-                'number_of_contigs': number_contigs,
-                'top_contigs_blastn': top_contigs_blastn,
-                'top_virus_kaiju': top_virus_kaiju,
-                'report_html_blob': report_html,
-            }
+            return pd.DataFrame([{
+                "sample_name": sample_name,
+                "read_length": read_length,
+                "number_reads": number_reads,
+                "mapped_to_human_percent": percent_mapped,
+                "kraken_virus_percent": kraken_virus_percent,
+                "kaiju_virus_percent": kaiju_virus_percent,
+                "number_of_contigs": number_contigs,
+                "top_contigs_blastn": top_contigs_blastn,
+                "top_virus_kaiju": top_virus_kaiju,
+                "report_html_blob": report_html,
+            }])
 
-            return pd.DataFrame([sample_info])
-
-        # Aggregate information for all samples
-        samples_info = [aggregate_sample_info(Path(params.results_folder) / sample) for sample in SAMPLES]
+        samples_info = [
+            aggregate_sample_info(Path(params.results_folder) / sample)
+            for sample in SAMPLES
+        ]
         run_info_df = pd.concat(samples_info, ignore_index=True)
-
-        # Save aggregated run information
         run_info_df.to_csv(output.run_info_csv, index=False)
 
 # Rule: Clean up intermediate files (optional)

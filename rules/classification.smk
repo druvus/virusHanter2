@@ -12,16 +12,29 @@ RESULT_FOLDER = os.path.join(config["RESULTS_FOLDER"], Path(config["SAMPLES"]).n
 KAIJU_DB = config["KAIJU_DB"]
 KRAKEN_DB = config["KRAKEN_DB"]
 
-# Get Kaiju database files
-fmi_file, names_file, nodes_file = kaiju_db_files(KAIJU_DB)
+
+# Lazy input resolvers for the Kaiju database files. These run at DAG build
+# time (after `--lint` / `-n` have already succeeded), so a missing database
+# directory will not abort workflow parsing.
+def _kaiju_fmi(wildcards):
+    return str(kaiju_db_files(config["KAIJU_DB"])[0])
+
+
+def _kaiju_names(wildcards):
+    return str(kaiju_db_files(config["KAIJU_DB"])[1])
+
+
+def _kaiju_nodes(wildcards):
+    return str(kaiju_db_files(config["KAIJU_DB"])[2])
+
 
 # Rule: Kaiju classification
 rule kaiju:
     input:
         r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
         r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
-        fmi=str(fmi_file),
-        nodes=str(nodes_file),
+        fmi=_kaiju_fmi,
+        nodes=_kaiju_nodes,
     output:
         kaiju_out=f"{RESULT_FOLDER}/{{sample}}/KAIJU/{{sample}}.kaiju.out",
     threads: THREADS
@@ -45,8 +58,8 @@ rule kaiju:
 rule kaiju_to_table:
     input:
         kaiju_out=rules.kaiju.output.kaiju_out,
-        names=str(names_file),
-        nodes=str(nodes_file),
+        names=_kaiju_names,
+        nodes=_kaiju_nodes,
     output:
         kaiju_table=f"{RESULT_FOLDER}/{{sample}}/KAIJU/{{sample}}.kaiju.table.tsv",
     conda:
@@ -72,6 +85,9 @@ rule kraken:
     params:
         db=KRAKEN_DB,
     threads: THREADS
+    resources:
+        mem_mb=64000,
+        runtime=120,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/kraken.log"
     conda:

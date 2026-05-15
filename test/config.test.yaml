@@ -1,0 +1,25 @@
+# Test configuration for virusHanter2.
+#
+# Paths under MINI_DB_ROOT are not committed; populate them locally with the
+# tiny mock databases described in test/README.md before running the full
+# smoke. The dry-run target (`run_smoke.sh`) does not require any of these
+# files to exist on disk.
+
+SAMPLES: "test"
+RESULTS_FOLDER: "test/results"
+THREADS: 2
+CLEAN: "FALSE"
+
+# Mock reference paths. These resolve at DAG construction time but only need
+# to physically exist for the full (non-dry-run) smoke.
+HUMAN_INDEX: "test/mini_db/human/human"
+KAIJU_DB: "test/mini_db/kaiju"
+KRAKEN_DB: "test/mini_db/kraken"
+BLASTN_DB: "test/mini_db/blast/viral"
+CHECKV_DB: "test/mini_db/checkv"
+VIRUS_PARQUET: "test/mini_db/virus.parquet"
+
+CONTIG_LENGTH: 200
+PLOT_THRESHOLD: 1
+NUMBER_OF_PLOTS: 3
+PILON_MEM: "2G"

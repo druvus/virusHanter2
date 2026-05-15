@@ -7,7 +7,14 @@ from pathlib import Path
 # Load configuration
 configfile: "config/config.yaml"
 
-# Import custom functions
+# Validate the config against its JSON schema before any rule depends on it.
+# Catches the common mistake of running the workflow against the template
+# config.yaml without filling in the database paths.
+from snakemake.utils import validate
+validate(config, "config/config.schema.yaml")
+
+# Import pipeline-side helpers. Report rendering and parsing live in the
+# reportHanter package; this Snakefile only owns the data-processing side.
 from scripts.functions import (
     read_file_as_blob,
     common_suffix,
@@ -16,15 +23,6 @@ from scripts.functions import (
     fastx_file_to_df,
     wrangle_kraken,
     run_blastn,
-    parse_bwa_flagstat,
-    parse_fastp,
-    plot_flagstat,
-    plot_kaiju,
-    kraken_df,
-    plot_kraken,
-    plot_blastn,
-    alignment_stats,
-    panel_report,
 )
 
 # Set sample information
@@ -47,6 +45,15 @@ include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
 include: "rules/assembly.smk"
 include: "rules/post_processing.smk"
+
+# Trivial rules that should run on the submission host rather than be queued.
+# Note: `wrangle_kraken`, `wrangle_pilon`, and `merge_checkv_blastn` need
+# pandas/pyfastx from their `conda:` envs, and Snakemake silently ignores
+# `conda:` on a localrule. They run as normal jobs.
+localrules:
+    all,
+    aggregate_run_information,
+    clean_everything,
 
 # Define the final targets of the workflow
 rule all:

@@ -142,8 +142,10 @@ rule remove_secondary_host:
             samtools flagstat {input.mapped_bam} > {output.flagstat}
             samtools view -b -f 12 {input.mapped_bam} > {output.unmapped_bam} 2>> {log}
         else
-            ln -s {input.unmapped_bam_human} {output.unmapped_bam}
-            touch {output.flagstat}
+            # Plain copy rather than a symlink so the output is portable
+            # across machines and archivable in place.
+            cp {input.unmapped_bam_human} {output.unmapped_bam}
+            : > {output.flagstat}
         fi
         """
 

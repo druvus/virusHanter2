@@ -1,0 +1,90 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: virusHanter2 configuration
+description: |
+  Schema for config/config.yaml. Validated at workflow parse time via
+  snakemake.utils.validate(). Catches the most common misconfiguration:
+  leaving the example "/path/to/..." placeholders in the config file.
+type: object
+
+properties:
+  SAMPLES:
+    type: string
+    description: Directory containing paired-end sequencing files.
+    not:
+      pattern: "^/path/to/"
+  RESULTS_FOLDER:
+    type: string
+    description: Output root.
+    not:
+      pattern: "^/path/to/"
+  THREADS:
+    type: integer
+    minimum: 1
+  CLEAN:
+    type: string
+    enum: ["TRUE", "FALSE"]
+  HUMAN_INDEX:
+    type: string
+    description: BWA index prefix for the host (human) genome.
+    not:
+      pattern: "^/path/to/"
+  KAIJU_DB:
+    type: string
+    description: Kaiju database directory (.fmi + names.dmp + nodes.dmp).
+    not:
+      pattern: "^/path/to/"
+  KRAKEN_DB:
+    type: string
+    description: Kraken2 database directory.
+    not:
+      pattern: "^/path/to/"
+  BLASTN_DB:
+    type: string
+    description: BLAST nucleotide database prefix.
+    not:
+      pattern: "^/path/to/"
+  CHECKV_DB:
+    type: string
+    description: CheckV database directory.
+    not:
+      pattern: "^/path/to/"
+  VIRUS_PARQUET:
+    type: string
+    description: Parquet of (name, sequence, tax_id) viral references.
+    not:
+      pattern: "^/path/to/"
+  CONTIG_LENGTH:
+    type: integer
+    minimum: 1
+    default: 500
+  PLOT_THRESHOLD:
+    type: integer
+    minimum: 0
+  NUMBER_OF_PLOTS:
+    type: integer
+    minimum: 1
+  PILON_MEM:
+    type: string
+    pattern: "^[0-9]+[Gg]$"
+    default: "50G"
+  SECONDARY_HOST_INDEX:
+    type: string
+    description: Optional BWA index for a secondary host.
+  SECONDARY_HOST_NAME:
+    type: string
+    description: Display name for the secondary host (e.g. "Mouse").
+
+required:
+  - SAMPLES
+  - RESULTS_FOLDER
+  - THREADS
+  - HUMAN_INDEX
+  - KAIJU_DB
+  - KRAKEN_DB
+  - BLASTN_DB
+  - CHECKV_DB
+  - VIRUS_PARQUET
+  - PLOT_THRESHOLD
+  - NUMBER_OF_PLOTS
+
+additionalProperties: false
