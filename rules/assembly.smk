@@ -38,22 +38,40 @@ rule megahit:
     conda:
         "../envs/megahit.yaml"
     run:
+        import subprocess
+
         # MEGAHIT refuses to run if the output directory already exists.
         shell("rm -rf {params.out_dir}")
-        shell(
-            "megahit "
-            "-1 {input.r1} -2 {input.r2} "
-            "-o {params.out_dir} "
-            "--out-prefix {wildcards.sample} "
-            "-t {threads} "
-            "2> {log}"
-        )
-        # Drop intermediate MEGAHIT files; keep the contigs FASTA.
-        shell("ls -d -1 {params.out_dir}/* | grep -v .fa | xargs rm -rf")
+        # `-m` caps memory at `resources.mem_mb` (in bytes). MEGAHIT
+        # auto-detects 90% of system RAM otherwise, which on Apple Silicon
+        # under Rosetta triggers SIGSEGV on small inputs.
+        mem_bytes = resources.mem_mb * 1024 * 1024
+        try:
+            shell(
+                "megahit "
+                "-1 {input.r1} -2 {input.r2} "
+                "-o {params.out_dir} "
+                "--out-prefix {wildcards.sample} "
+                f"-t {{threads}} -m {mem_bytes} "
+                "2> {log}"
+            )
+        except subprocess.CalledProcessError:
+            # MEGAHIT can SIGSEGV on tiny inputs. Make sure the output file
+            # exists so the dummy-contig fallback below writes to it.
+            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
+            Path(output.contigs).touch()
 
-        # If MEGAHIT produced no contigs, emit a dummy contig so downstream
-        # rules (BLASTN, CheckV, Pilon) still have an input. Mirrors the
-        # original virusHanter behavior.
+        # Drop intermediate MEGAHIT files; keep the contigs FASTA. The grep
+        # may exit non-zero when the directory only contains the .fa output;
+        # tolerate that.
+        shell(
+            "ls -d -1 {params.out_dir}/* 2>/dev/null "
+            "| grep -v .fa | xargs rm -rf || true"
+        )
+
+        # If MEGAHIT produced no contigs (or crashed), emit a dummy contig
+        # so downstream rules (BLASTN, CheckV, Pilon) still have an input.
+        # Mirrors the original virusHanter behavior.
         if Path(output.contigs).read_text() == "":
             with open(output.contigs, "w") as f:
                 f.write(">DUMMY_CONTIG\n")

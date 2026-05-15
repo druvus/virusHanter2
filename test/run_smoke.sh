@@ -30,10 +30,11 @@ if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
 fi
 
 build_if_requested() {
-    if [[ "$1" == "1" ]] || [[ ! -d "$MINI/human" ]]; then
-        echo "[smoke] (re)building mini fixtures"
-        bash test/build_fixtures.sh
-    fi
+    # build_fixtures is itself a Snakemake workflow, so rerunning it is
+    # cheap when outputs already exist. Always call it so missing FASTQ
+    # or DB files get regenerated.
+    echo "[smoke] running fixture build (Snakemake decides what to rebuild)"
+    bash test/build_fixtures.sh
 }
 
 run_lint_and_dryrun() {
@@ -48,8 +49,11 @@ run_lint_and_dryrun() {
 }
 
 run_full() {
+    # A real CheckV database has a `genome_db` subdir. Anything else (a
+    # missing directory, or one populated only with the smoke stub) is
+    # treated as absent.
     local checkv_ready=0
-    if [[ -d "$MINI/checkv" ]] && [[ ! -e "$MINI/checkv/.stub" ]]; then
+    if [[ -d "$MINI/checkv/genome_db" ]]; then
         checkv_ready=1
     fi
 

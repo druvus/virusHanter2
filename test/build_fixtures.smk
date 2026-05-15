@@ -36,7 +36,9 @@ rule all:
         f"{MINI}/kaiju/kaiju_db.fmi",
         f"{MINI}/blast/viral.nhr",
         f"{MINI}/virus.parquet",
-        f"{MINI}/checkv/.stub",
+    # CheckV's database is too large to synthesise. The smoke runner
+    # detects a real CheckV DB at `test/mini_db/checkv` by looking for
+    # `genome_db/`; when absent it degrades to a BLASTN-only smoke.
 
 
 # Pipeline-side helpers (Python only — no bioinformatics tools required).
@@ -191,10 +193,3 @@ rule blast_db:
         "makeblastdb -in {input.virus} -dbtype nucl -out {params.prefix} -title viral_mini"
 
 
-# CheckV stub. The real CheckV DB is too large to synthesise. The smoke
-# runner detects this sentinel and degrades to BLASTN-only.
-rule checkv_stub:
-    output:
-        stub=f"{MINI}/checkv/.stub",
-    shell:
-        "mkdir -p $(dirname {output.stub}) && : > {output.stub}"

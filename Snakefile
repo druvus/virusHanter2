@@ -52,7 +52,6 @@ include: "rules/post_processing.smk"
 # `conda:` on a localrule. They run as normal jobs.
 localrules:
     all,
-    aggregate_run_information,
     clean_everything,
 
 # Define the final targets of the workflow

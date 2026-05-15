@@ -1,0 +1,14 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - pip
+  - pandas>=2.0
+  - numpy>=1.24
+  # Match the driver Snakemake to avoid pickle incompatibilities with the
+  # `script:` directive (which transfers Snakemake.io objects between
+  # processes via pickle and fails if classes have been renamed).
+  - snakemake-minimal=9.14.*
+  - pip:
+      - git+https://github.com/druvus/reporthanter.git@main

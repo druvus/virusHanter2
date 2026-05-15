@@ -20,12 +20,21 @@ from pathlib import Path
 
 QUAL = "I"  # Phred 40, ASCII 73
 
-HOST_REF = (
-    "ACGTGACTGACGTAGCTAGCATCGACTGACTACGATCGATCGTAGCTAGCATCGATCGATCGTAGCTAGCATCGATCGATCGTAGCT" * 60
-)
-VIRUS_REF = (
-    "TTGCAACGGGCAAATAGTCAGCGGCATTACCTGCAAACGAACAGTATTACCGCAGGCCAGTCTGTAGGAAACAGGGCAAGTGCCATC" * 60
-)
+
+def _pseudo_random_seq(seed: int, length: int) -> str:
+    """Deterministic pseudo-random DNA of `length` from `seed`. Used so the
+    smoke fixtures are reproducible without committing 10kb of FASTA.
+    """
+    rng = random.Random(seed)
+    bases = "ACGT"
+    return "".join(rng.choice(bases) for _ in range(length))
+
+
+# 5 kb non-repetitive synthetic references. Tandem repeats collapse in the
+# de Bruijn graph and MEGAHIT assembles 0 contigs, so the reference must
+# carry enough sequence complexity for the assembler to find a path.
+HOST_REF = _pseudo_random_seq(seed=1, length=5000)
+VIRUS_REF = _pseudo_random_seq(seed=2, length=5000)
 
 
 def make_read(template: str, start: int, length: int = 150) -> str:
@@ -39,22 +48,26 @@ def write_pair(
 ) -> None:
     random.seed(seed)
 
+    # Aim for ~50x coverage of the viral reference so MEGAHIT produces a
+    # real contig (avoiding the dummy-contig fallback that confuses CheckV).
+    # Host reads stay modest; they only need to drive non-zero mapped counts
+    # in the flagstat output.
     records: list[tuple[str, str, str]] = []  # (id, r1, r2)
-    # Host reads
-    for i in range(30):
+    # Host reads (60 pairs)
+    for i in range(60):
         pos = random.randint(0, len(HOST_REF) - 400)
         r1 = make_read(HOST_REF, pos)
         r2 = make_read(HOST_REF, pos + 200)
         records.append((f"host_{i:03d}", r1, r2))
-    # Virus reads
-    for i in range(30):
+    # Virus reads (800 pairs ~ 50x coverage at 150bp paired, 5 kb reference)
+    for i in range(800):
         pos = random.randint(0, len(VIRUS_REF) - 400)
         r1 = make_read(VIRUS_REF, pos)
         r2 = make_read(VIRUS_REF, pos + 200)
         records.append((f"virus_{i:03d}", r1, r2))
-    # Random reads
+    # Random reads (50 pairs) to keep the unclassified bin non-empty
     bases = "ACGT"
-    for i in range(40):
+    for i in range(50):
         r1 = "".join(random.choice(bases) for _ in range(150))
         r2 = "".join(random.choice(bases) for _ in range(150))
         records.append((f"random_{i:03d}", r1, r2))
