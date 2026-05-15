@@ -42,9 +42,16 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
     kraken_df = pd.read_csv(
         sample_folder / "KRAKEN" / f"{sample_name}.kraken.csv"
     )
-    kraken_virus_percent = kraken_df.loc[
-        kraken_df["domain"] == "Viruses", "percent"
-    ].sum()
+    # Use the Domain-level row only. The original virusHanter aggregation
+    # summed every row whose `domain` column was "Viruses", which
+    # double-counted the D row plus every species under it (the Domain row's
+    # percent already includes the sub-clades). Selecting tax_lvl == "D"
+    # gives the correct viral fraction.
+    domain_rows = kraken_df.loc[
+        (kraken_df["tax_lvl"] == "D") & (kraken_df["name"] == "Viruses"),
+        "percent",
+    ]
+    kraken_virus_percent = float(domain_rows.iloc[0]) if not domain_rows.empty else 0.0
 
     kaiju_df = pd.read_csv(
         sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv",

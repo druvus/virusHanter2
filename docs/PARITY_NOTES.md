@@ -61,6 +61,22 @@ match exactly. String columns (`top_contigs_blastn`, `top_virus_kaiju`)
 should match exactly unless one of the documented divergences below
 applies.
 
+## Intentional fixes from the original
+
+The following number is *not* a parity divergence — it is a fix to a
+pre-existing aggregation bug in the original `virusHanter`:
+
+- **`kraken_virus_percent`**. The original `virusHanter` ran
+  `kraken_df.loc[kraken_df['domain'] == 'Viruses', 'percent'].sum()`,
+  which sums every row in the Kraken report whose `domain` column is
+  "Viruses" — i.e. the Domain (D) row plus every species (S) row
+  underneath it. Since the Domain row's percent already accounts for
+  every clade beneath it, this double-counts the viral fraction (often
+  by 2-3x, depending on how deep the species hierarchy reaches).
+  `virusHanter2` instead reads the single Domain-level row directly.
+  The new value is the correct viral percentage; an old `run_information_*.csv`
+  with this column will show a strictly larger (often 2-3x) value.
+
 ## Expected divergences
 
 The following differences are intentional and should not be treated as
