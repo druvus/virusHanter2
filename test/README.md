@@ -1,6 +1,6 @@
 # virusHanter2 smoke testing
 
-Two test tiers live here.
+Three test tiers live here.
 
 ## Dry-run (no databases needed)
 
@@ -8,39 +8,43 @@ Two test tiers live here.
 ./test/run_smoke.sh
 ```
 
-Runs `snakemake --lint` and `snakemake -n --use-conda` against
-`test/config.test.yaml` using the committed `test_R[12].fastq.gz` reads. The
-dry-run does not invoke any tool, so the mock databases under
-`test/mini_db/` do not have to exist on disk for it to pass. This is what CI
-runs on every commit and is the cheapest regression check for the DAG and
-the rule imports.
+Runs `snakemake --lint` and `snakemake -n --sdm conda` against
+`test/config.test.yaml`. No tools are invoked, so nothing under
+`test/mini_db/` has to exist. This is what CI runs on every commit and is
+the cheapest regression check for DAG construction and the rule imports.
 
-### Caveat about the committed fixture FASTQs
+The committed `test_R[12].fastq.gz` placeholders are 0-byte files; their
+`.gz` suffix is outside the FASTQ regex in `paired_reads()`, so a fresh
+checkout dry-runs with no per-sample plan. Run `./test/build_fixtures.sh`
+(or `./test/run_smoke.sh --build`) to overwrite them with synthesized
+`test_R[12].fastq` reads alongside the mock databases.
 
-`test_R[12].fastq.gz` ship as empty placeholders. The sample-discovery helper
-`paired_reads()` only matches files whose extension is `.fq`, `.fastq`, `.fa`,
-`.fasta`, or `.fna` (a behavior inherited from `virusHanter`), so as long as
-the placeholders are gzipped the dry-run reports an empty per-sample plan and
-only schedules the aggregate rule. To exercise the per-sample chain
-end-to-end, replace the placeholders with real un-gzipped reads (or add a
-small synthetic pair).
-
-## Full smoke (mini reference databases required)
+## Partial smoke (synthetic mini-DBs, no CheckV)
 
 ```
-./test/run_smoke.sh --full
+./test/run_smoke.sh --full     # auto-degrades when CheckV is stubbed
 ```
 
-Requires the following minimal databases under `test/mini_db/`:
+`build_fixtures.sh` synthesizes everything in `test/mini_db/` except a real
+CheckV database. Tools required on `$PATH` to build the fixtures:
 
-- `human/` — BWA index of a single short reference chromosome; prefix is `human`.
-- `kaiju/` — directory containing one `.fmi` file plus `names.dmp` and `nodes.dmp`.
-- `kraken/` — Kraken2 mini-DB (built with `kraken2-build --special viral` or similar).
-- `blast/` — BLAST nucleotide database with prefix `viral` (use `makeblastdb -in viruses.fasta -dbtype nucl -out viral`).
-- `checkv/` — CheckV mini-DB. Construct manually or symlink to a real one.
-- `virus.parquet` — Parquet of `name`, `sequence`, `tax_id` columns for a handful of viruses.
+| Tool | Used for |
+|---|---|
+| `python` + `pandas` + `pyarrow` | FASTQ synthesis, `virus.parquet` |
+| `bwa` | host BWA index |
+| `kraken2-build` | Kraken2 mini-DB |
+| `kaiju-mkbwt` + `kaiju-mkfmi` | Kaiju mini-DB |
+| `makeblastdb` | BLAST nt mini-DB |
 
-None of these files are tracked in git; build or copy them in locally before
-running `--full`. The full run produces `test/results/test/test/REPORT/test.html`
-and `test/results/test/run_information_test.csv` and the script asserts both
-exist.
+When `test/mini_db/checkv` contains the `.stub` sentinel, the smoke runs
+`snakemake --until blastn` and asserts the BLASTN output exists. The HTML
+report and run-info aggregation are skipped (they depend on
+`merge_checkv_blastn`).
+
+## Full smoke (real CheckV database)
+
+Provide a real CheckV database at `test/mini_db/checkv/` (e.g. by
+downloading it once with `checkv download_database test/mini_db/`) and
+remove the `.stub` sentinel. `./test/run_smoke.sh --full` will then run
+the complete pipeline including `generate_report` and assert the per-sample
+HTML and the run-information CSV exist.
