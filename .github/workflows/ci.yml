@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-dryrun:
+    name: Lint + dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Snakemake and reportHanter
+        run: |
+          pip install "snakemake>=9" pandas pyfastx numpy
+          pip install git+https://github.com/druvus/reporthanter.git@main
+
+      - name: snakemake --lint
+        run: snakemake --lint --configfile test/config.test.yaml
+
+      - name: snakemake --dry-run
+        run: snakemake -n --configfile test/config.test.yaml
