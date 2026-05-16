@@ -34,9 +34,15 @@ rule bwa_align_to_kraken_hits:
         import pandas as pd
         from pathlib import Path
 
-        # Read top Kraken2 viral taxa
+        # Read top Kraken2 viral taxa: select the 20 with the highest
+        # percent classified, matching the original virusHanter ordering.
         kraken_df = pd.read_csv(input.kraken_csv)
-        top_tax_ids = kraken_df.loc[kraken_df.domain == "Viruses", "taxonomy_id"].head(20).tolist()
+        top_tax_ids = (
+            kraken_df.loc[kraken_df.domain == "Viruses"]
+            .sort_values("percent", ascending=False)
+            .head(20)["taxonomy_id"]
+            .tolist()
+        )
 
         # Load viral sequences from the Parquet database
         virus_db_df = pd.read_parquet(params.virus_db)

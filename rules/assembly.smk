@@ -227,5 +227,7 @@ rule merge_checkv_blastn:
             .rename(columns={"contig_id": "name"})
             [["name", "total_genes", "viral_genes", "host_genes", "provirus"]]
         )
-        merged = pd.merge(blastn_df, checkv_df, on="name", how="left")
+        # Inner join on `name` matches the original virusHanter behaviour:
+        # contigs without a CheckV entry are dropped from the merged table.
+        merged = pd.merge(blastn_df, checkv_df, on="name", how="inner")
         merged.to_csv(output.merged_csv, index=False)

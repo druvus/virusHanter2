@@ -61,8 +61,12 @@ rule bwa_human:
     conda:
         "../envs/bwa.yaml"
     shell:
+        # `-k 26` raises bwa-mem's minimum seed length from 19 to 26, matching
+        # the original virusHanter setting for human contamination removal.
+        # A higher seed length trades a little sensitivity for fewer spurious
+        # short-seed matches against the human reference.
         """
-        bwa mem -t {threads} {params.index} {input.r1} {input.r2} | samtools sort -o {output.mapped_bam} - > {log} 2>&1
+        bwa mem -t {threads} -k 26 {params.index} {input.r1} {input.r2} | samtools sort -o {output.mapped_bam} - > {log} 2>&1
         """
 
 # Rule: Remove reads mapped to human genome
