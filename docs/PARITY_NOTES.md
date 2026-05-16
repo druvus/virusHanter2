@@ -66,6 +66,28 @@ read_len, number_reads, mapped_to_human_percent, kraken_virus_percent,
 kaiju_virus_percent, number_of_contigs, top_contigs_blastn,
 top_virus_kaiju, html_report, kaiju_report, blastn_report`.
 
+## Recent parity work
+
+The 2026-05-16 audit pass against `virusHanter/Snakefile` corrected
+several silent numerical and string divergences that would have
+surfaced as differences in a real-sample diff. Headline items:
+
+- `aggregate_run_information.py` now appends `(reads)` / `(read_len)`
+  suffixes to the `top_virus_kaiju` and `top_contigs_blastn` strings,
+  applies `.dropna()` before summing the kaiju percent, restores the
+  `run_name`, `date`, `kaiju_report`, and `blastn_report` columns, and
+  uses the original column names (`read_len`, `html_report`).
+- `bwa_human` re-adds `-k 26` to the bwa-mem invocation.
+- `merge_checkv_blastn` reverts to an inner join on `name`.
+- `bwa_align_to_kraken_hits` sorts viral taxa by `percent` descending
+  before selecting the top 20.
+- `scripts/functions.py:run_blastn` sets `BLASTDB` to the database
+  parent directory so blastn can find any `taxdb.*` auxiliary files.
+- `config/config.yaml` defaults align with the original: `CONTIG_LENGTH`
+  is 500 and `PLOT_THRESHOLD` is 5.
+- `reportHanter` Kraken `filter_data` default cutoff is 0.001 (matching
+  the original `plot_kraken`).
+
 ## Expected divergences
 
 The following differences are intentional and should not be treated as
