@@ -20,9 +20,12 @@ from scripts.functions import read_file_as_blob
 
 
 def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
+    sample_folder = sample_folder.resolve()
     sample_name = sample_folder.name
+    run_name = sample_folder.parts[-2]
+    date = run_name.split("_")[0]
 
-    report_html = read_file_as_blob(
+    html_report = read_file_as_blob(
         sample_folder / "REPORT" / f"{sample_name}.html"
     )
 
@@ -30,7 +33,7 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
     with open(fastp_json_path) as fh:
         fastp_summary = json.load(fh).get("summary", {})
     before = fastp_summary.get("before_filtering", {})
-    read_length = before.get("read1_mean_length", "")
+    read_len = before.get("read1_mean_length", "")
     number_reads = before.get("total_reads", 0)
 
     flagstat_proc = FlagstatProcessor()
@@ -39,41 +42,57 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
     flagstat_lookup = dict(zip(flagstat_df["metric"], flagstat_df["value"]))
     percent_mapped = flagstat_lookup.get("percent_mapped", 0.0)
 
+    # Kraken Domain-level viral percent. The Kraken wrangled CSV contains a
+    # single row with name == "Viruses" (the Domain row, tax_lvl == "D");
+    # its percent already accounts for every species clade beneath it.
     kraken_df = pd.read_csv(
         sample_folder / "KRAKEN" / f"{sample_name}.kraken.csv"
     )
-    # Use the Domain-level row only. The original virusHanter aggregation
-    # summed every row whose `domain` column was "Viruses", which
-    # double-counted the D row plus every species under it (the Domain row's
-    # percent already includes the sub-clades). Selecting tax_lvl == "D"
-    # gives the correct viral fraction.
     domain_rows = kraken_df.loc[
         (kraken_df["tax_lvl"] == "D") & (kraken_df["name"] == "Viruses"),
         "percent",
     ]
     kraken_virus_percent = float(domain_rows.iloc[0]) if not domain_rows.empty else 0.0
 
-    kaiju_df = pd.read_csv(
-        sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv",
-        sep="\t",
-    )
-    kaiju_virus_percent = float(kaiju_df["percent"].sum())
+    # Kaiju: drop unclassified / "cannot be assigned" rows (taxon_id NA in
+    # the table) before summing percents, matching the original
+    # virusHanter behaviour. Keep them in the table used for the
+    # top-N name list, which the original also included.
+    kaiju_table_path = sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv"
+    kaiju_report = read_file_as_blob(kaiju_table_path)
+    kaiju_df = pd.read_csv(kaiju_table_path, sep="\t")
+    kaiju_virus_percent = float(kaiju_df.dropna()["percent"].sum())
     top_virus_kaiju = "||".join(
-        kaiju_df["taxon_name"].head(10).astype(str).tolist()
+        f"{row.taxon_name} ({row.reads})"
+        for row in kaiju_df.head(10).itertuples()
     )
 
     blastn_csv = sample_folder / "BLASTN" / f"{sample_name}.contigs.blastn.csv"
-    blastn_df = pd.read_csv(blastn_csv) if blastn_csv.exists() else pd.DataFrame()
+    if blastn_csv.exists():
+        blastn_df = pd.read_csv(blastn_csv)
+        blastn_report = read_file_as_blob(blastn_csv)
+    else:
+        blastn_df = pd.DataFrame()
+        blastn_report = ""
+
     number_contigs = len(blastn_df)
-    top_contigs_blastn = (
-        "||".join(blastn_df["match_name"].head(5).astype(str).tolist())
-        if "match_name" in blastn_df.columns
-        else ""
-    )
+    if {"match_name", "read_len"}.issubset(blastn_df.columns):
+        top_contigs_blastn = "||".join(
+            f"{row.match_name} ({row.read_len})"
+            for row in blastn_df.head(5).itertuples()
+        )
+    elif "match_name" in blastn_df.columns:
+        top_contigs_blastn = "||".join(
+            blastn_df["match_name"].head(5).astype(str).tolist()
+        )
+    else:
+        top_contigs_blastn = ""
 
     return pd.DataFrame([{
+        "run_name": run_name,
         "sample_name": sample_name,
-        "read_length": read_length,
+        "date": date,
+        "read_len": read_len,
         "number_reads": number_reads,
         "mapped_to_human_percent": percent_mapped,
         "kraken_virus_percent": kraken_virus_percent,
@@ -81,7 +100,9 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
         "number_of_contigs": number_contigs,
         "top_contigs_blastn": top_contigs_blastn,
         "top_virus_kaiju": top_virus_kaiju,
-        "report_html_blob": report_html,
+        "html_report": html_report,
+        "kaiju_report": kaiju_report,
+        "blastn_report": blastn_report,
     }])
 
 

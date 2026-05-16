@@ -46,36 +46,25 @@ side-by-side and checking each tab:
 ### Run-aggregation CSV
 
 `run_information_<batch>.csv` is byte-stable apart from the
-`report_html_blob` column (hex-encoded HTML, which carries the same
-timestamp/build-id non-determinism described above). Diff the two CSVs
-with that column dropped, e.g.:
+`html_report` column (hex-encoded HTML, which carries the same
+timestamp/build-id non-determinism described above). The
+`kaiju_report` and `blastn_report` blob columns are byte-stable across
+runs (no embedded timestamps). Diff the two CSVs with the HTML blob
+column dropped, e.g.:
 
 ```
-csvcut -C report_html_blob run_information_<batch>.csv | sort > a.csv
-csvcut -C report_html_blob run_information_<batch>.csv | sort > b.csv
+csvcut -C html_report run_information_<batch>.csv | sort > a.csv
+csvcut -C html_report run_information_<batch>.csv | sort > b.csv
 diff a.csv b.csv
 ```
 
 Numeric columns (read counts, percentages, `number_of_contigs`) should
 match exactly. String columns (`top_contigs_blastn`, `top_virus_kaiju`)
 should match exactly unless one of the documented divergences below
-applies.
-
-## Intentional fixes from the original
-
-The following number is *not* a parity divergence — it is a fix to a
-pre-existing aggregation bug in the original `virusHanter`:
-
-- **`kraken_virus_percent`**. The original `virusHanter` ran
-  `kraken_df.loc[kraken_df['domain'] == 'Viruses', 'percent'].sum()`,
-  which sums every row in the Kraken report whose `domain` column is
-  "Viruses" — i.e. the Domain (D) row plus every species (S) row
-  underneath it. Since the Domain row's percent already accounts for
-  every clade beneath it, this double-counts the viral fraction (often
-  by 2-3x, depending on how deep the species hierarchy reaches).
-  `virusHanter2` instead reads the single Domain-level row directly.
-  The new value is the correct viral percentage; an old `run_information_*.csv`
-  with this column will show a strictly larger (often 2-3x) value.
+applies. Column order should also match: `run_name, sample_name, date,
+read_len, number_reads, mapped_to_human_percent, kraken_virus_percent,
+kaiju_virus_percent, number_of_contigs, top_contigs_blastn,
+top_virus_kaiju, html_report, kaiju_report, blastn_report`.
 
 ## Expected divergences
 
@@ -94,10 +83,6 @@ regressions:
   rule reads `summary.before_filtering.read1_mean_length` directly from
   the JSON. For paired-end reads with consistent length this matches; for
   ragged input the JSON value (mean) is the right answer.
-
-- **Aggregation column order.** Column names are preserved; column order
-  is determined by Python `dict` insertion order, which is stable but may
-  differ from the original.
 
 - **Per-section error messages.** The refactored `ReportGenerator` wraps
   each section in its own try/except, so any per-section failure will
