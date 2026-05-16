@@ -25,8 +25,9 @@ KRAKEN_DB: "/path/to/kraken2/database"
 # Path to the BLASTN nucleotide database
 BLASTN_DB: "/path/to/blastn/database"
 
-# Minimum contig length to keep after assembly
-CONTIG_LENGTH: 1000
+# Minimum contig length to keep after assembly. Matches the original
+# virusHanter default; the fallback in assembly.smk is also 500.
+CONTIG_LENGTH: 500
 
 # Path to the CheckV database
 CHECKV_DB: "/path/to/checkv/database"
@@ -34,8 +35,9 @@ CHECKV_DB: "/path/to/checkv/database"
 # Path to the Parquet file containing viral sequences (used for coverage plots)
 VIRUS_PARQUET: "/path/to/virus_sequences.parquet"
 
-# Coverage threshold for generating coverage plots
-PLOT_THRESHOLD: 10
+# Coverage threshold for generating coverage plots. Matches the original
+# virusHanter default.
+PLOT_THRESHOLD: 5
 
 # Number of top references to include in coverage plots
 NUMBER_OF_PLOTS: 10

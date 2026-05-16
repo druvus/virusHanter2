@@ -149,7 +149,12 @@ def run_blastn(contigs_csv: str, db: str, temp_file: str, threads: int) -> pd.Da
     """Run blastn (megablast) on each row of a contigs CSV one at a time and
     return the input table joined with the best hit per contig.
     """
-    os.environ["BLASTDB"] = db
+    # `BLASTDB` should point at the directory that holds the database files
+    # (and any auxiliary `taxdb.*` files), not at the database prefix
+    # itself. The original virusHanter pulled this from a dedicated
+    # `BLASTDB_ENVIRON_VARIABLE` config entry; we derive it from the db
+    # path so we do not need a second config key.
+    os.environ["BLASTDB"] = str(Path(db).parent)
     df = pd.read_csv(contigs_csv)
     if df.empty:
         return df
