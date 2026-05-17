@@ -37,7 +37,7 @@ def common_suffix(folder: str) -> str:
     samples = sorted(
         file.name
         for file in Path(folder).iterdir()
-        if re.search(r"\.(fq|fastq|fa|fasta|fna)$", file.name)
+        if re.search(r"\.(fq|fastq|fa|fasta|fna)(\.gz)?$", file.name)
     )
     if not samples:
         return ""
@@ -67,7 +67,7 @@ def paired_reads(folder: str) -> list:
     samples = sorted(
         x.stem
         for x in Path(folder).iterdir()
-        if re.search(r"\.(fq|fastq|fa|fasta|fna)$", x.name)
+        if re.search(r"\.(fq|fastq|fa|fasta|fna)(\.gz)?$", x.name)
     )
 
     prefixes = []

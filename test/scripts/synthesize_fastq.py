@@ -6,10 +6,10 @@ Writes 100 read pairs:
   - 30 derived from the synthetic viral reference (drive Kraken/Kaiju/BLAST hits)
   - 40 random reads (force unclassified bins to be non-empty)
 
-The output FASTQ files are gzipped so they remain "*.fastq.gz" on disk for
-the README convention, even though paired_reads() in scripts/functions.py
-ignores the .gz suffix in its regex; the smoke runner generates a sibling
-.fastq pair that the workflow can actually pick up.
+The output FASTQ files are gzipped when the requested path ends in
+".gz", matching the way production MiSeq batches are stored on disk.
+paired_reads() / common_suffix() in scripts/functions.py recognise the
+.gz suffix.
 """
 from __future__ import annotations
 

@@ -1,0 +1,33 @@
+# Production config keyed at the refreshed LaCie reference databases
+# (2026-05-17). Use with:
+#   snakemake --sdm conda --cores <N> --configfile config/config.production.yaml
+#
+# SAMPLES is intentionally pointed at a subsampled scratch folder so the
+# first real-data smoke is bounded. Replace the path with the full MiSeq
+# run folder under /Volumes/LaCie/REGIONEN/Transfer/data/<run_id>/ once
+# the subsampled run is signed off.
+
+SAMPLES: "/Users/andreassjodin/Code/regionen/scratch/subsampled"
+RESULTS_FOLDER: "/Users/andreassjodin/Code/regionen/scratch/results"
+THREADS: 8
+CLEAN: "FALSE"
+
+HUMAN_INDEX:   "/Volumes/LaCie/REGIONEN/ref_dbs/BWA_GENCODE_GRCH38/human_gencode"
+KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/KAIJU_DB/refseq"
+KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/standard"
+# BLASTN_DB is the prefix of the .nal alias file; the run_blastn helper
+# derives the BLASTDB env var from Path(db).parent so taxdb.* lookups
+# work.
+BLASTN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
+CHECKV_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/CHECKV_DB/checkv-db-v1.5"
+VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+
+# Match the original virusHanter defaults so a parity diff is meaningful.
+CONTIG_LENGTH: 500
+PLOT_THRESHOLD: 5
+NUMBER_OF_PLOTS: 10
+PILON_MEM: "8G"
+
+# Uncomment if a secondary host is to be removed (e.g. mouse).
+# SECONDARY_HOST_INDEX: "/path/to/secondary/host"
+# SECONDARY_HOST_NAME: "Mouse"

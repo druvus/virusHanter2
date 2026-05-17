@@ -10,7 +10,8 @@
 #             --directory .
 #
 # Outputs:
-#   test/test_R{1,2}.fastq                 (paired reads)
+#   test/test_R{1,2}.fastq.gz              (paired reads, gzipped to match
+#                                           production .fastq.gz inputs)
 #   test/mini_db/host.fasta                (host reference)
 #   test/mini_db/virus.fasta               (viral reference, nucleotide)
 #   test/mini_db/virus_aa.fasta            (viral reference, protein)
@@ -29,8 +30,8 @@ SCRIPTS = "test/scripts"
 
 rule all:
     input:
-        "test/test_R1.fastq",
-        "test/test_R2.fastq",
+        "test/test_R1.fastq.gz",
+        "test/test_R2.fastq.gz",
         f"{MINI}/human/human.bwt",
         f"{MINI}/kraken/hash.k2d",
         f"{MINI}/kaiju/kaiju_db.fmi",
@@ -44,8 +45,8 @@ rule all:
 # Pipeline-side helpers (Python only — no bioinformatics tools required).
 rule synthesize_reads:
     output:
-        r1="test/test_R1.fastq",
-        r2="test/test_R2.fastq",
+        r1="test/test_R1.fastq.gz",
+        r2="test/test_R2.fastq.gz",
     shell:
         "python {SCRIPTS}/synthesize_fastq.py "
         "--out-r1 {output.r1} --out-r2 {output.r2}"
