@@ -24,6 +24,18 @@ MINI="test/mini_db"
 # Many bioconda packages (bwa, samtools, etc.) do not ship an osx-arm64
 # build. On Apple Silicon, fall back to osx-64 binaries via Rosetta by
 # pinning CONDA_SUBDIR before any env is materialised. No-op on Linux.
+#
+# Known Apple-Silicon-only failures observed against real input
+# (2026-05-17, sub-sampled 251015 batch, MacBook Pro):
+#   - bam2plot: polars >= 1.40 segfaults via Rosetta; mitigated with
+#     polars-lts-cpu, but the env still needs care.
+#   - kaiju:     SIGSEGV when loading the ~22 GB refseq FMI under Rosetta.
+#   - kraken2:   the standard hash.k2d (~21 GB) does not fit in RAM on
+#                this host; exits with "Error reading in hash table".
+#   - megahit:   megahit_core_popcnt uses popcnt/AVX instructions that
+#                Rosetta does not emulate cleanly; SIGSEGV on real inputs.
+# The smoke fixtures stay green because they are small enough that the
+# AVX path is not exercised. Production runs must happen on Linux.
 APPLE_SILICON=0
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     export CONDA_SUBDIR="${CONDA_SUBDIR:-osx-64}"
