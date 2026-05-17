@@ -71,6 +71,16 @@ properties:
     type: string
     enum: ["TRUE", "FALSE"]
     default: "TRUE"
+  GENOMAD:
+    type: string
+    enum: ["TRUE", "FALSE"]
+    default: "FALSE"
+  GENOMAD_DB:
+    type: string
+    description: |
+      Path to a populated geNomad database directory. Required when
+      `GENOMAD` is "TRUE"; ignored otherwise. Empty string is
+      acceptable when geNomad is off.
   MEGAHIT_MEM_FRACTION:
     type: number
     minimum: 0.01

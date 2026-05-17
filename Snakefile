@@ -43,6 +43,11 @@ clean_list = [f"{RESULT_FOLDER}/analysis_done.txt"] if config.get("CLEAN", "FALS
 # Optional run-level QC. Default on; set MULTIQC: "FALSE" to skip.
 RUN_MULTIQC = config.get("MULTIQC", "TRUE") == "TRUE"
 
+# Optional geNomad second viral-contig classifier. Default off so the
+# parity invariant holds; flip GENOMAD: "TRUE" and populate GENOMAD_DB
+# to opt in.
+RUN_GENOMAD_WF = config.get("GENOMAD", "FALSE") == "TRUE"
+
 # Include rule files
 include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
@@ -70,4 +75,13 @@ rule all:
         expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
         # Run-level QC, gated by MULTIQC config flag (default TRUE).
         [f"{RESULT_FOLDER}/multiqc_report.html"] if RUN_MULTIQC else [],
+        # Optional geNomad classifier, gated by GENOMAD config flag.
+        (
+            expand(
+                f"{RESULT_FOLDER}/{{sample}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+                sample=SAMPLES,
+            )
+            if RUN_GENOMAD_WF
+            else []
+        ),
         clean_list,

@@ -21,6 +21,11 @@ CHECKV_DB = config["CHECKV_DB"]
 PILON_MEM = config.get("PILON_MEM", "50G")
 PILON_MEM_MB = int(PILON_MEM.rstrip("Gg")) * 1024
 
+# Optional geNomad classifier (off by default; turn on with
+# `GENOMAD: "TRUE"` in config plus a populated `GENOMAD_DB`).
+RUN_GENOMAD = config.get("GENOMAD", "FALSE") == "TRUE"
+GENOMAD_DB = config.get("GENOMAD_DB", "")
+
 
 # Rule: De novo assembly with MEGAHIT
 rule megahit:
@@ -253,3 +258,44 @@ rule merge_checkv_blastn:
         # contigs without a CheckV entry are dropped from the merged table.
         merged = pd.merge(blastn_df, checkv_df, on="name", how="inner")
         merged.to_csv(output.merged_csv, index=False)
+
+
+# Rule: Optional second viral-contig classifier (geNomad).
+#
+# Off by default. Turn on with `GENOMAD: "TRUE"` and a populated
+# `GENOMAD_DB` in config. Stores a summary TSV under GENOMAD/ alongside
+# the existing CheckV outputs. Does NOT feed the per-sample HTML or
+# the run-aggregation CSV; the merged_csv schema and every other
+# parity-locked output stay byte-identical.
+#
+# Pulls the Pilon-polished contigs (same input CheckV uses) and runs
+# `genomad end-to-end` to classify each contig as plasmid, viral, or
+# chromosomal. The summary file is the per-sample headline output:
+# `<sample>_summary/<sample>_virus_summary.tsv`.
+rule genomad:
+    input:
+        contigs=rules.pilon.output.improved_contigs,
+    output:
+        summary=f"{RESULT_FOLDER}/{{sample}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+    params:
+        db=GENOMAD_DB,
+        out_dir=f"{RESULT_FOLDER}/{{sample}}/GENOMAD",
+    threads: THREADS
+    resources:
+        mem_mb=16000,
+        runtime=240,
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/genomad.log"
+    conda:
+        "../envs/genomad.yaml"
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        genomad end-to-end \
+            --threads {threads} \
+            --cleanup \
+            {input.contigs} \
+            {params.out_dir} \
+            {params.db} \
+            > {log} 2>&1
+        """

@@ -1,0 +1,80 @@
+# Reference databases
+
+The pipeline consumes several reference databases. All currently live
+under `/Volumes/LaCie/REGIONEN/ref_dbs/` and are referenced by the
+production config at
+`virusHanter2/config/config.production.yaml`.
+
+| DB | Path | Used by | Refresh cadence |
+|---|---|---|---|
+| Human BWA index | `BWA_GENCODE_GRCH38/human_gencode*` | `bwa_human` | stable, very rarely |
+| Kraken2 standard | `KRAKEN_DB/standard/` | `kraken` (lower RAM) | annual |
+| Kraken2 pluspf | `KRAKEN_DB/pluspf/` | `kraken` (richer, ~82 GB hash) | annual |
+| Kaiju refseq | `KAIJU_DB/refseq/` | `kaiju` | annual |
+| CheckV v1.5 | `CHECKV_DB/checkv-db-v1.5/` | `checkv` | when CheckV releases a new DB |
+| BLAST viral + mito | `BLAST_DB/blast_db/` + alias `viral_rna_mito.nal` | `blastn` | quarterly |
+| Viral RefSeq FASTA | `VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna` | source for `all_viruses.parquet` | quarterly |
+| `nucl_gb.accession2taxid.gz` | `INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz` | source for `all_viruses.parquet` | with each viral RefSeq refresh |
+| `all_viruses.parquet` | `INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet` | `bwa_align_to_kraken_hits`, `per_virus_metrics` | rebuild after FASTA refresh |
+| geNomad DB (optional) | `GENOMAD_DB/` | `genomad` (only when `GENOMAD: "TRUE"`) | when geNomad releases a new DB |
+
+## Rebuilding `all_viruses.parquet`
+
+The parquet is keyed by `(name, sequence, tax_id)` and is consumed by
+`bwa_align_to_kraken_hits` to pick reference sequences for the top
+Kraken2 viral taxids, and by `per_virus_metrics` to attribute
+contigs and aggregate coverage per taxid. Refresh it whenever the
+viral RefSeq FASTA changes, using the bounded-memory builder.
+
+```
+cd /Users/andreassjodin/Code/regionen/virusHanter2
+python scripts/build_virus_parquet.py \
+    --fasta /Volumes/LaCie/REGIONEN/ref_dbs/VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna \
+    --taxid /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz \
+    --out   /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet
+```
+
+The script streams the gzipped `nucl_gb.accession2taxid` and keeps
+only the entries whose accession appears in the viral FASTA (~30k
+keys). Memory stays bounded.
+
+Last successful rebuild on this workstation (2026-05-17): 19,149
+records, 14,899 unique tax_ids, 39 records (0.2%) without a taxid,
+mean reference length 30 kb. The 39 unmatched records are normal —
+typically very recent submissions whose accession2taxid mapping has
+not propagated yet.
+
+## Sources for the inputs
+
+- Viral RefSeq FASTA: download from
+  `https://ftp.ncbi.nlm.nih.gov/refseq/release/viral/` and concatenate
+  the `*.genomic.fna.gz` files into one FASTA named
+  `viral_refseq_<YYYYMMDD>.fna`.
+- `nucl_gb.accession2taxid.gz`: download from
+  `https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/`
+  along with its `.md5` for verification.
+- Kraken2 indices: download from
+  `https://genome-idx.s3.amazonaws.com/kraken/` and extract in
+  place. The pluspf 2024-01-12 tarball is ~63 GB compressed and
+  expands to ~96 GB.
+- Kaiju indices: download from `https://kaiju.binf.ku.dk/server` or
+  build with `kaiju-makedb`. The refseq build is ~22 GB.
+- CheckV v1.5: `https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz`.
+- BLAST viral DBs: refresh `ref_viruses_rep_genomes`, `mito_rna_db`,
+  and the `taxdb` files via `update_blastdb.pl` from the BLAST+
+  toolkit. The `viral_rna_mito.nal` alias is hand-written and
+  references both the viral and mito BLAST databases.
+- geNomad DB (only if you opt into the genomad rule): download from
+  `https://portal.nersc.gov/genomad/__data__/genomad_db_v1.7.tar.gz`
+  (~1.5 GB compressed), extract to a directory of your choosing,
+  and set `GENOMAD_DB: "/path/to/genomad_db"` in your config.
+
+## Apple Silicon / RAM-limited host notes
+
+- Kraken2 with the pluspf hash needs more RAM than is available on a
+  typical laptop. Use the `standard` build for local debugging; run
+  pluspf on a Linux host with >= 96 GB RAM.
+- Kaiju's refseq `.fmi` is ~22 GB; it loads entirely into memory and
+  the same RAM constraint applies.
+- The viral parquet, BWA indices, and CheckV / mosdepth / fastp all
+  run within ~16 GB.

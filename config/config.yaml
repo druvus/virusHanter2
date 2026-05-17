@@ -47,6 +47,13 @@ NUMBER_OF_PLOTS: 10
 # to skip. Default is "TRUE".
 MULTIQC: "TRUE"
 
+# Optional: run geNomad as a second viral-contig classifier alongside
+# CheckV. Off by default for parity. Flip to "TRUE" and set
+# GENOMAD_DB to a populated geNomad database directory to opt in.
+# See docs/REFERENCE_DBS.md for the DB download URL.
+GENOMAD: "FALSE"
+GENOMAD_DB: ""
+
 # Optional: Path to the BWA index for a secondary host genome (e.g., mouse)
 # If not using a secondary host, comment out or remove these lines
 # SECONDARY_HOST_INDEX: "/path/to/secondary/host/genome/index"

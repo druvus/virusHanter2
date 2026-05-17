@@ -130,6 +130,13 @@ to a pre-change run.
   `summary.txt` and `regions.bed.gz` columns are unchanged from the
   original mosdepth invocation when callers ignore the threshold
   data.
+- **`genomad` rule** (`rules/assembly.smk`): optional second
+  viral-contig classifier. Off by default
+  (`GENOMAD: "FALSE"`); when enabled, runs `genomad end-to-end` on
+  the Pilon-polished contigs and writes a per-sample summary TSV
+  under `GENOMAD/<sample>_summary/`. Does not merge into
+  `merged_csv` or feed the report, so existing tabs/columns stay
+  byte-identical regardless of the flag.
 
 Aggregated CSV: the two new columns `duplicate_pairs` and
 `duplicate_rate_percent` are appended after `blastn_report`. To

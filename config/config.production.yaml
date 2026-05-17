@@ -30,6 +30,10 @@ PILON_MEM: "8G"
 
 # Additive QC additions from the 2026-05-17 Twist VRP audit.
 MULTIQC: "TRUE"
+# Optional second viral-contig classifier. Off until a geNomad DB is
+# materialised; see docs/REFERENCE_DBS.md for the download URL.
+GENOMAD: "FALSE"
+GENOMAD_DB: ""
 
 # Uncomment if a secondary host is to be removed (e.g. mouse).
 # SECONDARY_HOST_INDEX: "/path/to/secondary/host"
