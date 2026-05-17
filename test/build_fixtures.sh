@@ -15,10 +15,7 @@ cd "$(dirname "$0")/.."
 
 CORES="${SMOKE_CORES:-2}"
 
-# osx-arm64 fallback (see run_smoke.sh for context).
-if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
-    export CONDA_SUBDIR="${CONDA_SUBDIR:-osx-64}"
-fi
+# Apple Silicon: rely on native osx-arm64 builds (see run_smoke.sh).
 
 snakemake \
     --snakefile test/build_fixtures.smk \

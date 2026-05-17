@@ -14,7 +14,7 @@ CLEAN: "FALSE"
 
 HUMAN_INDEX:   "/Volumes/LaCie/REGIONEN/ref_dbs/BWA_GENCODE_GRCH38/human_gencode"
 KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/KAIJU_DB/refseq"
-KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/standard"
+KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/pluspf"
 # BLASTN_DB is the prefix of the .nal alias file; the run_blastn helper
 # derives the BLASTDB env var from Path(db).parent so taxdb.* lookups
 # work.

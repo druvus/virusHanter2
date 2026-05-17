@@ -4,6 +4,8 @@
 # Ported from the original virusHanter/Snakefile (rules: megahit, pilon,
 # wrangle_pilon, blastn, checkv, merge_checkv_blastn).
 
+import platform
+
 from scripts.functions import (
     fastx_file_to_df,
     run_blastn,
@@ -42,17 +44,29 @@ rule megahit:
 
         # MEGAHIT refuses to run if the output directory already exists.
         shell("rm -rf {params.out_dir}")
-        # `-m` caps memory at `resources.mem_mb` (in bytes). MEGAHIT
-        # auto-detects 90% of system RAM otherwise, which on Apple Silicon
-        # under Rosetta triggers SIGSEGV on small inputs.
-        mem_bytes = resources.mem_mb * 1024 * 1024
+        # MEGAHIT defaults to allocating 90% of detected RAM up front,
+        # which SIGSEGVs on a memory-tight host (e.g. an 18 GB laptop with
+        # other processes already running). Bound the request to a
+        # configurable fraction so it fits on small hosts; on a Linux box
+        # with abundant RAM this is still a sensible cap.
+        mem_fraction = float(config.get("MEGAHIT_MEM_FRACTION", 0.5))
+        # Apple Silicon bioconda osx-arm64 megahit has two reproducible
+        # quirks: (1) `megahit_core_popcnt` segfaults on `count -k 21`
+        # regardless of memory; (2) `megahit_core_no_hw_accel` segfaults
+        # at `-t > 2`. Force the no_hw_accel variant and cap threads at
+        # 2 on Darwin/arm64. Both flags are no-ops or harmless on Linux.
+        is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
+        no_hw_accel = "--no-hw-accel " if is_apple_silicon else ""
+        mh_threads = min(threads, 2) if is_apple_silicon else threads
         try:
             shell(
                 "megahit "
                 "-1 {input.r1} -2 {input.r2} "
                 "-o {params.out_dir} "
                 "--out-prefix {wildcards.sample} "
-                f"-t {{threads}} -m {mem_bytes} "
+                f"-t {mh_threads} "
+                f"-m {mem_fraction} "
+                f"{no_hw_accel}"
                 "2> {log}"
             )
         except subprocess.CalledProcessError:
@@ -195,6 +209,14 @@ rule checkv:
     conda:
         "../envs/checkv.yaml"
     shell:
+        # Known issue on macOS (both osx-64 via Rosetta and native osx-arm64):
+        # CheckV 1.0.3's `search_hmms` reports "80 hmmsearch tasks failed"
+        # even when every .hmmout file ends with the `# [ok]` marker, because
+        # sp.Popen(cmd, shell=True).wait() returns non-zero in that
+        # multiprocessing.Pool worker context. The bug is independent of the
+        # number of threads (also fails at -t 1) and the hmmer build, and
+        # there is no newer CheckV release on bioconda. Production / Phase 6
+        # parity runs must use Linux.
         """
         checkv contamination \
             -d {params.db} \

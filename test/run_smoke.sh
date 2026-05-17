@@ -21,28 +21,20 @@ cd "$(dirname "$0")/.."
 CONFIG="test/config.test.yaml"
 MINI="test/mini_db"
 
-# Many bioconda packages (bwa, samtools, etc.) do not ship an osx-arm64
-# build. On Apple Silicon, fall back to osx-64 binaries via Rosetta by
-# pinning CONDA_SUBDIR before any env is materialised. No-op on Linux.
-#
-# Known Apple-Silicon-only failures observed against real input
-# (2026-05-17, sub-sampled 251015 batch, MacBook Pro):
-#   - bam2plot: polars >= 1.40 segfaults via Rosetta; mitigated with
-#     polars-lts-cpu, but the env still needs care.
-#   - kaiju:     SIGSEGV when loading the ~22 GB refseq FMI under Rosetta.
-#   - kraken2:   the standard hash.k2d (~21 GB) does not fit in RAM on
-#                this host; exits with "Error reading in hash table".
-#   - megahit:   megahit_core_popcnt uses popcnt/AVX instructions that
-#                Rosetta does not emulate cleanly; SIGSEGV on real inputs.
-# The smoke fixtures stay green because they are small enough that the
-# AVX path is not exercised. Production runs must happen on Linux.
+# Apple Silicon detection. Historically this script forced
+# CONDA_SUBDIR=osx-64 because several bioconda tools (bwa, samtools, ...)
+# only shipped osx-64 builds, but the Rosetta path then segfaulted on
+# AVX/SIMD-heavy tools (MEGAHIT, kaiju, polars in bam2plot). The
+# upstream bioconda packages we depend on now ship native osx-arm64 (or
+# noarch) builds, so we no longer pin the subdir and let conda choose.
+# Kraken2 with the pluspf database still needs more RAM than a typical
+# laptop has; on Apple Silicon prefer the standard DB or use Linux.
 APPLE_SILICON=0
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
-    export CONDA_SUBDIR="${CONDA_SUBDIR:-osx-64}"
     APPLE_SILICON=1
-    echo "[smoke] Apple Silicon detected; using CONDA_SUBDIR=$CONDA_SUBDIR"
-    echo "[smoke] (bam2plot/polars >= 1.40 segfaults under Rosetta;"
-    echo "[smoke]  the --full path will stop at merge_checkv_blastn on this host.)"
+    echo "[smoke] Apple Silicon detected; using native osx-arm64 envs."
+    echo "[smoke] If a rule fails with 'PackagesNotFoundError', that env"
+    echo "[smoke] still lacks an arm64 build and may need CONDA_SUBDIR=osx-64."
 fi
 
 build_if_requested() {
