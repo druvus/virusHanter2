@@ -118,6 +118,18 @@ to a pre-change run.
 - **`multiqc` rule** (`rules/post_processing.smk`): workflow-level
   rule that emits `{RESULT_FOLDER}/multiqc_report.html`. Gated by the
   `MULTIQC: "TRUE"` config flag (default on); set to `"FALSE"` to skip.
+- **`per_virus_metrics` + `aggregate_per_virus` rules**
+  (`rules/post_processing.smk`): join Kraken/Kaiju/BLASTN/mosdepth/
+  fastp/flagstat into a flat per-(sample, virus) CSV. Per-sample
+  output at `{sample}/{sample}.per_virus.csv`; batch-level
+  concatenation at `{RESULT_FOLDER}/per_virus_<batch>.csv`. Schema
+  documented in `docs/PER_VIRUS_OUTPUT.md`. Does not touch the
+  existing per-sample summary CSV or HTML reports.
+- **`mosdepth_kraken_hits` rule**: extended with `--thresholds 1,5,10`
+  to emit `MOSDEPTH/<sample>.thresholds.bed.gz`. Pure addition;
+  `summary.txt` and `regions.bed.gz` columns are unchanged from the
+  original mosdepth invocation when callers ignore the threshold
+  data.
 
 Aggregated CSV: the two new columns `duplicate_pairs` and
 `duplicate_rate_percent` are appended after `blastn_report`. To

@@ -75,6 +75,11 @@ rule mosdepth_kraken_hits:
     output:
         summary=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt",
         regions=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.regions.bed.gz",
+        # `--thresholds 1,5,10` emits a sibling `thresholds.bed.gz`
+        # with per-region counts of bases at each coverage threshold.
+        # `per_virus_metrics` sums the 5x column per chrom to get
+        # `bases_above_5x`.
+        thresholds=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.thresholds.bed.gz",
     params:
         prefix=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}",
     log:
@@ -86,6 +91,7 @@ rule mosdepth_kraken_hits:
         """
         mkdir -p $(dirname {params.prefix})
         mosdepth -t {threads} --no-per-base --by 1000 \
+            --thresholds 1,5,10 \
             {params.prefix} {input.bam} > {log} 2>&1
         """
 
@@ -158,6 +164,73 @@ rule generate_report:
             {params.secondary_args} \
             > {log} 2>&1
         """
+
+# Rule: Per-sample per-virus metrics.
+#
+# Joins the existing pipeline outputs (Kraken, Kaiju, BLASTN merged
+# CSV, mosdepth summary + thresholds, fastp JSON, host flagstat) and
+# the workflow-level viral parquet into a flat CSV with one row per
+# detected Kraken viral taxid for this sample. Schema: see
+# `docs/PER_VIRUS_OUTPUT.md`.
+rule per_virus_metrics:
+    input:
+        kraken_csv=rules.wrangle_kraken.output.kraken_csv,
+        kaiju_tsv=rules.kaiju_to_table.output.kaiju_table,
+        blastn_csv=rules.merge_checkv_blastn.output.merged_csv,
+        mosdepth_summary=rules.mosdepth_kraken_hits.output.summary,
+        mosdepth_thresholds=rules.mosdepth_kraken_hits.output.thresholds,
+        fastp_json=rules.fastp.output.json_report,
+        flagstat=rules.remove_host.output.flagstat,
+        virus_parquet=VIRUS_PARQUET,
+    output:
+        per_virus_csv=f"{RESULT_FOLDER}/{{sample}}/{{sample}}.per_virus.csv",
+    params:
+        run_name=Path(config["SAMPLES"]).name,
+        top_n=NUMBER_OF_PLOTS,
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/per_virus_metrics.log"
+    conda:
+        "../envs/panel.yaml"
+    shell:
+        """
+        python scripts/per_virus_metrics.py \
+            --sample-name {wildcards.sample} \
+            --run-name {params.run_name} \
+            --kraken-csv {input.kraken_csv} \
+            --kaiju-tsv {input.kaiju_tsv} \
+            --blastn-csv {input.blastn_csv} \
+            --mosdepth-summary {input.mosdepth_summary} \
+            --mosdepth-thresholds {input.mosdepth_thresholds} \
+            --fastp-json {input.fastp_json} \
+            --flagstat {input.flagstat} \
+            --virus-parquet {input.virus_parquet} \
+            --top-n {params.top_n} \
+            --out {output.per_virus_csv} \
+            > {log} 2>&1
+        """
+
+
+# Rule: Concatenate per-sample per_virus CSVs into a single batch file.
+rule aggregate_per_virus:
+    input:
+        per_sample=expand(
+            f"{RESULT_FOLDER}/{{sample}}/{{sample}}.per_virus.csv",
+            sample=SAMPLES,
+        ),
+    output:
+        per_virus_csv=f"{RESULT_FOLDER}/per_virus_{Path(config['SAMPLES']).name}.csv",
+    log:
+        f"{RESULT_FOLDER}/logs/aggregate_per_virus.log"
+    conda:
+        "../envs/panel.yaml"
+    shell:
+        """
+        python scripts/aggregate_per_virus.py \
+            --in {input.per_sample} \
+            --out {output.per_virus_csv} \
+            > {log} 2>&1
+        """
+
 
 # Rule: Workflow-level MultiQC aggregation.
 # Runs after every per-sample report is finalised and after the

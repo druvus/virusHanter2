@@ -1,0 +1,386 @@
+"""Extract per-(sample, virus) metrics for the Twist VRP collaborator.
+
+Joins the existing pipeline outputs (Kraken2 report, Kaiju table,
+BLASTN merged CSV, mosdepth summary + thresholds, fastp JSON, host
+flagstat) and the workflow-level viral parquet into a flat CSV with
+one row per detected virus (Kraken taxid) per sample.
+
+The schema is described in `docs/PER_VIRUS_OUTPUT.md`.
+
+Usage:
+
+    python scripts/per_virus_metrics.py \\
+        --sample-name 135_S1_L001_R \\
+        --run-name 251015_M00568_0723_000000000-DRRKK \\
+        --kraken-csv      .../KRAKEN/135.kraken.csv \\
+        --kaiju-tsv       .../KAIJU/135.kaiju.table.tsv \\
+        --blastn-csv      .../CHECKV/135.merged.csv \\
+        --mosdepth-summary    .../MOSDEPTH/135.mosdepth.summary.txt \\
+        --mosdepth-thresholds .../MOSDEPTH/135.thresholds.bed.gz \\
+        --fastp-json      .../FASTP/135.fastp.json \\
+        --flagstat        .../logs/human_contamination_flagstat.txt \\
+        --virus-parquet   .../INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet \\
+        --top-n 20 \\
+        --out             .../135.per_virus.csv
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import re
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers — unit-tested in tests/test_per_virus_metrics.py.
+# ---------------------------------------------------------------------------
+
+
+_FLAGSTAT_TOTAL_RE = re.compile(r"^(\d+)\s+\+\s+\d+\s+paired in sequencing", re.M)
+_FLAGSTAT_MAPPED_RE = re.compile(
+    r"^(\d+)\s+\+\s+\d+\s+with itself and mate mapped", re.M
+)
+
+
+def parse_flagstat(text: str) -> tuple[int, int]:
+    """Return (paired_in_sequencing, with_itself_and_mate_mapped) from a
+    `samtools flagstat` report.
+    """
+    total_match = _FLAGSTAT_TOTAL_RE.search(text)
+    mapped_match = _FLAGSTAT_MAPPED_RE.search(text)
+    total = int(total_match.group(1)) if total_match else 0
+    mapped = int(mapped_match.group(1)) if mapped_match else 0
+    return total, mapped
+
+
+def parse_fastp_total_reads(fastp_json_text: str) -> int:
+    """Return `summary.before_filtering.total_reads` from a fastp JSON."""
+    doc = json.loads(fastp_json_text)
+    return int(doc.get("summary", {}).get("before_filtering", {}).get("total_reads", 0))
+
+
+def kraken_viral_top_n(kraken_df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
+    """Replicate `bwa_align_to_kraken_hits`'s selection: take the rows in
+    the Viruses domain, sort by percent descending, keep the top N.
+
+    Returns the same columns as the input, plus a stable `rank` 0..N-1.
+    """
+    viral = (
+        kraken_df.loc[kraken_df["domain"] == "Viruses"]
+        .sort_values("percent", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+    viral["rank"] = viral.index
+    return viral
+
+
+def parquet_first_token(name: str) -> str:
+    """First whitespace-delimited token of a FASTA header, matching the
+    chrom name BWA / mosdepth produce.
+    """
+    return str(name).split()[0]
+
+
+def parquet_base_accession(name: str) -> str:
+    """First token without the trailing `.VERSION` suffix.
+    `NC_000866.4 ...` -> `NC_000866`.
+    """
+    return parquet_first_token(name).split(".")[0]
+
+
+def kaiju_lookup(kaiju_df: pd.DataFrame) -> dict[int, dict[str, object]]:
+    """Index a Kaiju TSV by integer `taxon_id`. NA taxon_ids are dropped
+    (those are the "unclassified" / "cannot be assigned" rows).
+    """
+    if kaiju_df.empty or "taxon_id" not in kaiju_df.columns:
+        return {}
+    tid = pd.to_numeric(kaiju_df["taxon_id"], errors="coerce")
+    df = kaiju_df.assign(tid_int=tid).dropna(subset=["tid_int"])
+    out: dict[int, dict[str, object]] = {}
+    for row in df.itertuples():
+        out[int(row.tid_int)] = {
+            "taxon_name": getattr(row, "taxon_name", ""),
+            "reads": int(getattr(row, "reads", 0) or 0),
+            "percent": float(getattr(row, "percent", 0.0) or 0.0),
+        }
+    return out
+
+
+def parquet_refs_by_taxid(parquet_df: pd.DataFrame) -> dict[int, list[dict]]:
+    """Bucket parquet rows by tax_id. Each bucket holds one dict per
+    reference with the first-token chrom id and the base accession (so
+    BLAST hits without an explicit version still match).
+    """
+    out: dict[int, list[dict]] = {}
+    for row in parquet_df.itertuples():
+        try:
+            tid = int(row.tax_id)
+        except (ValueError, TypeError):
+            continue
+        if tid == 0:
+            continue
+        chrom = parquet_first_token(row.name)
+        base = parquet_base_accession(row.name)
+        out.setdefault(tid, []).append({"chrom": chrom, "base_accession": base})
+    return out
+
+
+def mosdepth_summary_table(summary_text: str) -> dict[str, dict[str, float]]:
+    """Parse `mosdepth.summary.txt` (TSV with a header) into
+    `{chrom: {length, bases, mean}}`. The trailing `total` and
+    `total_region` rows are skipped.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for i, line in enumerate(summary_text.splitlines()):
+        if i == 0 or not line.strip():
+            continue
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 4:
+            continue
+        chrom = parts[0]
+        if chrom in ("total", "total_region"):
+            continue
+        try:
+            length = int(parts[1])
+            bases = int(parts[2])
+            mean = float(parts[3])
+        except ValueError:
+            continue
+        out[chrom] = {"length": length, "bases": bases, "mean": mean}
+    return out
+
+
+def mosdepth_thresholds_table(thresholds_bed_gz: Path) -> dict[str, dict[str, int]]:
+    """Sum the per-region 1X/5X/10X columns of a mosdepth thresholds
+    BED into `{chrom: {bases_>=1, bases_>=5, bases_>=10}}`.
+
+    The file ships with a `#chrom  start  end  region  1X  5X  10X`
+    header; subsequent rows are TSV.
+    """
+    out: dict[str, dict[str, int]] = {}
+    header: list[str] | None = None
+    with gzip.open(thresholds_bed_gz, "rt") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if line.startswith("#"):
+                header = [p.lstrip("#") for p in parts]
+                continue
+            if header is None or len(parts) < len(header):
+                continue
+            chrom = parts[0]
+            row_counts = out.setdefault(
+                chrom, {"bases_ge_1x": 0, "bases_ge_5x": 0, "bases_ge_10x": 0}
+            )
+            for col_name, raw in zip(header, parts):
+                if col_name == "1X":
+                    row_counts["bases_ge_1x"] += int(raw or 0)
+                elif col_name == "5X":
+                    row_counts["bases_ge_5x"] += int(raw or 0)
+                elif col_name == "10X":
+                    row_counts["bases_ge_10x"] += int(raw or 0)
+    return out
+
+
+def attribute_contigs(
+    blastn_df: pd.DataFrame,
+    parquet_acc_to_tax: dict[str, int],
+    taxid_to_name: dict[int, str],
+) -> dict[int, int]:
+    """Count BLASTN-merged rows attributable to each Kraken taxid.
+
+    Two-tier match: by accession (preferred), then by case-insensitive
+    substring of the BLASTN `match_name`'s first token in the Kraken
+    name.
+    """
+    counts: dict[int, int] = {}
+    if blastn_df.empty:
+        return counts
+    for row in blastn_df.itertuples():
+        tid: int | None = None
+        # Tier 1: accession lookup.
+        accession = getattr(row, "accession", None)
+        if accession is not None and not pd.isna(accession):
+            base = str(accession).split(".")[0]
+            tid = parquet_acc_to_tax.get(base) or parquet_acc_to_tax.get(
+                str(accession)
+            )
+        # Tier 2: substring of match_name in any kraken name.
+        if tid is None:
+            match_name = getattr(row, "match_name", None)
+            if match_name is not None and not pd.isna(match_name):
+                hit_token = str(match_name).split()[0].lower()
+                for candidate_tid, kraken_name in taxid_to_name.items():
+                    if hit_token and hit_token in str(kraken_name).lower():
+                        tid = candidate_tid
+                        break
+        if tid is not None:
+            counts[tid] = counts.get(tid, 0) + 1
+    return counts
+
+
+def build_per_virus_rows(
+    *,
+    run_name: str,
+    sample_name: str,
+    kraken_df: pd.DataFrame,
+    kaiju_df: pd.DataFrame,
+    blastn_df: pd.DataFrame,
+    parquet_df: pd.DataFrame,
+    summary: dict[str, dict[str, float]],
+    thresholds: dict[str, dict[str, int]],
+    total_reads: int,
+    human_reads: int,
+    top_n: int = 20,
+) -> pd.DataFrame:
+    """Top-level join. Returns a DataFrame with the schema documented in
+    `docs/PER_VIRUS_OUTPUT.md`.
+    """
+    viral = kraken_viral_top_n(kraken_df, top_n=top_n)
+
+    # All-virus reads = the Domain "Viruses" row's `count_clades`, which
+    # already accounts for every species clade beneath it. Summing the
+    # whole `domain == "Viruses"` subtree would double-count (Domain +
+    # all descendants). Matches the `kraken_virus_percent` parity fix
+    # in `aggregate_run_information.py`.
+    domain_rows = kraken_df.loc[
+        (kraken_df["tax_lvl"] == "D") & (kraken_df["name"] == "Viruses"),
+        "count_clades",
+    ]
+    all_viral_reads = int(domain_rows.iloc[0]) if not domain_rows.empty else 0
+    non_human_reads = total_reads - human_reads
+    human_pct = 100.0 * human_reads / total_reads if total_reads > 0 else 0.0
+    non_human_pct = 100.0 - human_pct if total_reads > 0 else 0.0
+    other_reads = non_human_reads - all_viral_reads
+    all_virus_rpm = (
+        all_viral_reads * 1_000_000.0 / total_reads if total_reads > 0 else 0.0
+    )
+
+    parquet_buckets = parquet_refs_by_taxid(parquet_df)
+    parquet_acc_to_tax: dict[str, int] = {}
+    for tid, refs in parquet_buckets.items():
+        for ref in refs:
+            parquet_acc_to_tax[ref["base_accession"]] = tid
+
+    kaiju_by_tid = kaiju_lookup(kaiju_df)
+    taxid_to_name = {int(r.taxonomy_id): r.name for r in viral.itertuples()}
+    contig_counts = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
+
+    date_part = run_name.split("_")[0] if run_name else ""
+
+    rows: list[dict] = []
+    for v in viral.itertuples():
+        taxid = int(v.taxonomy_id)
+        virus_reads_kraken = int(v.count_clades)
+        # Aggregate mosdepth across all references for this taxid.
+        total_length = 0
+        total_bases = 0
+        total_ge5x = 0
+        for ref in parquet_buckets.get(taxid, []):
+            chrom = ref["chrom"]
+            s = summary.get(chrom)
+            if s is None:
+                continue
+            total_length += int(s["length"])
+            total_bases += int(s["bases"])
+            t = thresholds.get(chrom, {})
+            total_ge5x += int(t.get("bases_ge_5x", 0))
+        mean_cov = total_bases / total_length if total_length > 0 else 0.0
+        completeness_5x = total_ge5x / total_length if total_length > 0 else 0.0
+
+        specific_rpm = (
+            virus_reads_kraken * 1_000_000.0 / total_reads if total_reads > 0 else 0.0
+        )
+
+        kaiju_row = kaiju_by_tid.get(taxid, {})
+        rows.append(
+            {
+                "run_name": run_name,
+                "sample_name": sample_name,
+                "date": date_part,
+                "virus_name_kraken": v.name,
+                "virus_taxid": taxid,
+                "virus_name_kaiju": kaiju_row.get("taxon_name", ""),
+                "contigs": contig_counts.get(taxid, 0),
+                "virus_reads_kraken2": virus_reads_kraken,
+                "other_reads": other_reads,
+                "total_reads": total_reads,
+                "human_reads": human_reads,
+                "human_reads_percent": human_pct,
+                "non_human_reads": non_human_reads,
+                "non_human_reads_percent": non_human_pct,
+                "note": "",
+                "specific_virus_rpm": specific_rpm,
+                "all_virus_rpm": all_virus_rpm,
+                "completeness_5x": completeness_5x,
+                "bases_above_5x": total_ge5x,
+                "mean_coverage": mean_cov,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point.
+# ---------------------------------------------------------------------------
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--sample-name", required=True)
+    p.add_argument("--run-name", required=True)
+    p.add_argument("--kraken-csv", required=True, type=Path)
+    p.add_argument("--kaiju-tsv", required=True, type=Path)
+    p.add_argument("--blastn-csv", required=True, type=Path)
+    p.add_argument("--mosdepth-summary", required=True, type=Path)
+    p.add_argument("--mosdepth-thresholds", required=True, type=Path)
+    p.add_argument("--fastp-json", required=True, type=Path)
+    p.add_argument("--flagstat", required=True, type=Path)
+    p.add_argument("--virus-parquet", required=True, type=Path)
+    p.add_argument("--top-n", type=int, default=20)
+    p.add_argument("--out", required=True, type=Path)
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    kraken_df = pd.read_csv(args.kraken_csv)
+    kaiju_df = (
+        pd.read_csv(args.kaiju_tsv, sep="\t") if args.kaiju_tsv.exists() else pd.DataFrame()
+    )
+    blastn_df = pd.read_csv(args.blastn_csv) if args.blastn_csv.exists() else pd.DataFrame()
+    parquet_df = pd.read_parquet(args.virus_parquet)
+
+    summary = mosdepth_summary_table(args.mosdepth_summary.read_text())
+    thresholds = mosdepth_thresholds_table(args.mosdepth_thresholds)
+
+    total_reads = parse_fastp_total_reads(args.fastp_json.read_text())
+    _, human_reads = parse_flagstat(args.flagstat.read_text())
+
+    df = build_per_virus_rows(
+        run_name=args.run_name,
+        sample_name=args.sample_name,
+        kraken_df=kraken_df,
+        kaiju_df=kaiju_df,
+        blastn_df=blastn_df,
+        parquet_df=parquet_df,
+        summary=summary,
+        thresholds=thresholds,
+        total_reads=total_reads,
+        human_reads=human_reads,
+        top_n=args.top_n,
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(args.out, index=False)
+
+
+if __name__ == "__main__":
+    main()
