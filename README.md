@@ -10,12 +10,32 @@
 ## Features
 
 - **Quality Control**: Trimming and filtering of raw reads using `fastp`.
-- **Host Contamination Removal**: Alignment to host genomes (e.g., human) using `BWA` and removal of host-derived reads.
-- **Taxonomic Classification**: Classification of reads using `Kaiju` and `Kraken2`.
-- **Assembly and Annotation**: Assembly of reads into contigs using `MEGAHIT`, polishing with `Pilon`, and annotation using `BLASTN` and `CheckV`.
-- **Visualization and Reporting**: Generation of interactive HTML reports using `Panel`, including coverage plots and taxonomic summaries.
-- **Modularity**: Organized into separate rule files for better maintainability.
-- **Reproducibility**: Each rule specifies its own Conda environment, ensuring consistent computational environments across runs.
+- **Host Contamination Removal**: Alignment to host genomes (e.g.,
+  human) using `BWA` and removal of host-derived reads.
+- **PCR Duplicate Accounting**: `samtools markdup -s` on the
+  host-aligned BAM, useful for hybrid-capture libraries
+  (Twist VRP).
+- **Taxonomic Classification**: Classification of reads using `Kaiju`
+  and `Kraken2`.
+- **Assembly and Annotation**: Assembly of reads into contigs using
+  `MEGAHIT`, polishing with `Pilon`, and annotation using `BLASTN`
+  and `CheckV`.
+- **Per-Reference Coverage Stats**: `mosdepth` summaries with
+  thresholds at 1x/5x/10x for every reference in the Kraken-top-N
+  alignment.
+- **Visualization and Reporting**: Interactive per-sample HTML
+  reports (Panel), per-reference SVG coverage profiles (`bam2plot`),
+  and a workflow-level `MultiQC` dashboard.
+- **Per-(sample, virus) detail CSV**: One row per detected Kraken
+  viral taxid per sample with read counts, RPM, contig count,
+  completeness at 5x, and mean coverage. Documented in
+  `docs/PER_VIRUS_OUTPUT.md`.
+- **Multi-run aggregation**: `scripts/merge_runs.py` combines several
+  Illumina runs into master CSVs without re-running the workflow.
+- **Modularity**: Organized into separate rule files for better
+  maintainability.
+- **Reproducibility**: Each rule specifies its own Conda environment,
+  ensuring consistent computational environments across runs.
 
 ## Installation
 
@@ -195,24 +215,68 @@ These files specify the exact versions of software to ensure reproducibility.
 
 ## Outputs
 
-The pipeline generates the following outputs:
+The pipeline generates the following outputs, all under
+`{RESULTS_FOLDER}/{batch}/`, where `batch` is the basename of `SAMPLES`:
 
-- **Quality Control Reports**: HTML and JSON reports from `fastp`.
-- **Trimmed Reads**: FASTQ files after quality control.
-- **Host-Removed Reads**: FASTQ files with host reads removed.
+### Per-sample outputs (`{batch}/{sample}/`)
+
+- **Quality Control Reports**: HTML and JSON reports from `fastp` under
+  `FASTP/`.
+- **Trimmed Reads**: FASTQ files after quality control (under
+  `FASTP/`).
+- **Host-Removed Reads**: FASTQ files with human reads removed (under
+  `bwa/`).
+- **PCR Duplicate Stats**: `samtools markdup -s` summary at
+  `logs/human_markdup_stats.txt` (reporting only — does not filter
+  reads).
 - **Classification Results**:
-  - Kaiju output files and classification tables.
-  - Kraken2 reports and processed CSV files.
+  - Kaiju output files and classification tables under `KAIJU/`.
+  - Kraken2 reports and the processed `<sample>.kraken.csv` under
+    `KRAKEN/`.
 - **Assembly and Annotation**:
-  - Assembled contigs from MEGAHIT.
-  - Polished contigs from Pilon.
-  - BLASTN annotation results.
-  - CheckV contamination assessment.
-- **Coverage Plots**: Visualizations of read coverage over viral genomes.
-- **Interactive Reports**: HTML reports with interactive visualizations.
-- **Aggregated Run Information**: CSV files summarizing results across samples.
+  - Assembled contigs from MEGAHIT under `MEGAHIT/`.
+  - Polished contigs from Pilon under `PILON/`.
+  - BLASTN annotation results under `BLASTN/`.
+  - CheckV contamination assessment under `CHECKV/`, plus the
+    BLASTN+CheckV inner-joined `<sample>.merged.csv`.
+- **Coverage Plots**: SVG coverage profiles for top Kraken viral hits
+  under `COVERAGE_PLOTS/`.
+- **Per-Reference Coverage Stats**: `mosdepth` numeric summary +
+  per-region BED + thresholds (1x/5x/10x) under `MOSDEPTH/`.
+- **Per-Sample HTML Report**: `REPORT/<sample>.html`.
+- **Per-Sample Per-Virus CSV**: `<sample>.per_virus.csv` — one row per
+  detected Kraken viral taxid with read counts, RPM, contig count,
+  Kaiju match, and coverage metrics. Schema in
+  `docs/PER_VIRUS_OUTPUT.md`.
 
-All outputs are organized in the `results/` directory, structured per sample and analysis step.
+### Per-batch outputs (`{batch}/`)
+
+- **`run_information_<batch>.csv`** — one row per sample, summary
+  metrics (parity-locked to the original virusHanter; see
+  `docs/PARITY_NOTES.md`).
+- **`per_virus_<batch>.csv`** — concatenation of every sample's
+  `per_virus.csv`. The collaborator-facing detail file.
+- **`multiqc_report.html`** + `multiqc_data/` — workflow-level QC
+  dashboard covering fastp, samtools, kraken2, mosdepth, and markdup
+  across the whole batch. Gated by `MULTIQC: "TRUE"` in
+  `config.yaml` (default on).
+
+### Combining multiple Illumina runs
+
+`scripts/merge_runs.py` is a standalone CLI that walks several batch
+folders and writes `master_per_sample.csv` and `master_per_virus.csv`
+into an out-dir. Each input row already carries its `run_name`, so
+the master files are self-describing.
+
+```bash
+python scripts/merge_runs.py \
+    --result-folder /path/to/RESULTS/<batch1> \
+    --result-folder /path/to/RESULTS/<batch2> \
+    --out-dir /path/to/master/
+```
+
+See `docs/PER_VIRUS_OUTPUT.md` for the full schema and a worked
+example.
 
 
 ## Customization
