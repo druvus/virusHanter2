@@ -36,8 +36,9 @@ GENOMAD: "FALSE"
 # Path to the `genomad_db/` directory produced by
 # `genomad download-database <dir>` (or extracted from the Zenodo
 # tarball at https://zenodo.org/records/14886553). Required when
-# GENOMAD is "TRUE".
-GENOMAD_DB: ""
+# GENOMAD is "TRUE". The DB was materialised here on 2026-05-17
+# (geNomad v1.12.0); flip GENOMAD to "TRUE" to enable the rule.
+GENOMAD_DB: "/Volumes/LaCie/REGIONEN/ref_dbs/GENOMAD_DB/genomad_db"
 
 # Uncomment if a secondary host is to be removed (e.g. mouse).
 # SECONDARY_HOST_INDEX: "/path/to/secondary/host"

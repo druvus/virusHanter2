@@ -16,7 +16,7 @@ production config at
 | Viral RefSeq FASTA | `VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna` | source for `all_viruses.parquet` | quarterly |
 | `nucl_gb.accession2taxid.gz` | `INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz` | source for `all_viruses.parquet` | with each viral RefSeq refresh |
 | `all_viruses.parquet` | `INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet` | `bwa_align_to_kraken_hits`, `per_virus_metrics` | rebuild after FASTA refresh |
-| geNomad DB (optional) | `GENOMAD_DB/` | `genomad` (only when `GENOMAD: "TRUE"`) | when geNomad releases a new DB |
+| geNomad DB (optional) | `GENOMAD_DB/genomad_db/` | `genomad` (only when `GENOMAD: "TRUE"`) | when geNomad releases a new DB |
 
 ## Rebuilding `all_viruses.parquet`
 
