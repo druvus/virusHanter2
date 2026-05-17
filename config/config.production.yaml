@@ -33,6 +33,10 @@ MULTIQC: "TRUE"
 # Optional second viral-contig classifier. Off until a geNomad DB is
 # materialised; see docs/REFERENCE_DBS.md for the download URL.
 GENOMAD: "FALSE"
+# Path to the `genomad_db/` directory produced by
+# `genomad download-database <dir>` (or extracted from the Zenodo
+# tarball at https://zenodo.org/records/14886553). Required when
+# GENOMAD is "TRUE".
 GENOMAD_DB: ""
 
 # Uncomment if a secondary host is to be removed (e.g. mouse).

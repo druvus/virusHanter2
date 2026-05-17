@@ -64,10 +64,23 @@ not propagated yet.
   and the `taxdb` files via `update_blastdb.pl` from the BLAST+
   toolkit. The `viral_rna_mito.nal` alias is hand-written and
   references both the viral and mito BLAST databases.
-- geNomad DB (only if you opt into the genomad rule): download from
-  `https://portal.nersc.gov/genomad/__data__/genomad_db_v1.7.tar.gz`
-  (~1.5 GB compressed), extract to a directory of your choosing,
-  and set `GENOMAD_DB: "/path/to/genomad_db"` in your config.
+- geNomad DB (only if you opt into the genomad rule): the
+  recommended fetch is the geNomad CLI itself, which fetches the
+  current release into a `genomad_db/` subdirectory of the path
+  you give it:
+
+  ```bash
+  conda activate <env with genomad>
+  cd /Volumes/LaCie/REGIONEN/ref_dbs
+  mkdir -p GENOMAD_DB && cd GENOMAD_DB
+  genomad download-database .
+  # produces ./genomad_db/
+  ```
+
+  Then set `GENOMAD_DB: "/Volumes/LaCie/REGIONEN/ref_dbs/GENOMAD_DB/genomad_db"`
+  in your config. A manual fallback is the Zenodo mirror at
+  `https://zenodo.org/records/14886553`; extract the tarball and
+  point `GENOMAD_DB` at the resulting `genomad_db/` directory.
 
 ## Apple Silicon / RAM-limited host notes
 

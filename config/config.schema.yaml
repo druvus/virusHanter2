@@ -78,9 +78,11 @@ properties:
   GENOMAD_DB:
     type: string
     description: |
-      Path to a populated geNomad database directory. Required when
-      `GENOMAD` is "TRUE"; ignored otherwise. Empty string is
-      acceptable when geNomad is off.
+      Path to the populated geNomad database directory (the
+      `genomad_db/` produced by `genomad download-database <dir>`,
+      or extracted from https://zenodo.org/records/14886553).
+      Required when `GENOMAD` is "TRUE"; ignored when off.
+      Empty string is acceptable when off.
   MEGAHIT_MEM_FRACTION:
     type: number
     minimum: 0.01

@@ -49,8 +49,9 @@ MULTIQC: "TRUE"
 
 # Optional: run geNomad as a second viral-contig classifier alongside
 # CheckV. Off by default for parity. Flip to "TRUE" and set
-# GENOMAD_DB to a populated geNomad database directory to opt in.
-# See docs/REFERENCE_DBS.md for the DB download URL.
+# GENOMAD_DB to the populated `genomad_db/` directory produced by
+# `genomad download-database <dir>` (or the Zenodo manual fallback).
+# See docs/REFERENCE_DBS.md.
 GENOMAD: "FALSE"
 GENOMAD_DB: ""
 
