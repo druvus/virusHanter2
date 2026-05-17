@@ -42,6 +42,11 @@ PLOT_THRESHOLD: 5
 # Number of top references to include in coverage plots
 NUMBER_OF_PLOTS: 10
 
+# Optional: run MultiQC over the whole batch at the end of the workflow
+# and write {RESULTS_FOLDER}/<batch>/multiqc_report.html. Set to "FALSE"
+# to skip. Default is "TRUE".
+MULTIQC: "TRUE"
+
 # Optional: Path to the BWA index for a secondary host genome (e.g., mouse)
 # If not using a secondary host, comment out or remove these lines
 # SECONDARY_HOST_INDEX: "/path/to/secondary/host/genome/index"

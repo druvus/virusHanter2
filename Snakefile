@@ -40,6 +40,9 @@ SECONDARY_HOST_OR_NOT = bool(SECONDARY_HOST)
 # Set clean list based on configuration
 clean_list = [f"{RESULT_FOLDER}/analysis_done.txt"] if config.get("CLEAN", "FALSE") == "TRUE" else []
 
+# Optional run-level QC. Default on; set MULTIQC: "FALSE" to skip.
+RUN_MULTIQC = config.get("MULTIQC", "TRUE") == "TRUE"
+
 # Include rule files
 include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
@@ -59,4 +62,9 @@ rule all:
     input:
         expand(f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html", sample=SAMPLES),
         f"{RESULT_FOLDER}/run_information_{Path(SAMPLES_FOLDER).name}.csv",
+        # Per-sample additive QC outputs (do not feed any other rule).
+        expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES),
+        expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
+        # Run-level QC, gated by MULTIQC config flag (default TRUE).
+        [f"{RESULT_FOLDER}/multiqc_report.html"] if RUN_MULTIQC else [],
         clean_list,

@@ -42,6 +42,32 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
     flagstat_lookup = dict(zip(flagstat_df["metric"], flagstat_df["value"]))
     percent_mapped = flagstat_lookup.get("percent_mapped", 0.0)
 
+    # PCR duplicate stats from `samtools markdup -s` on the host BAM.
+    # The file is optional (missing on legacy runs); when absent both
+    # columns are left blank so a parity diff against pre-markdup runs
+    # is still clean once the new columns are dropped.
+    duplicate_pairs: int | str = ""
+    duplicate_rate_percent: float | str = ""
+    markdup_path = sample_folder / "logs" / "human_markdup_stats.txt"
+    if markdup_path.exists():
+        markdup_stats: dict[str, int] = {}
+        with open(markdup_path) as fh:
+            for line in fh:
+                if ":" not in line:
+                    continue
+                key, _, value = line.strip().partition(":")
+                try:
+                    markdup_stats[key.strip()] = int(value.strip())
+                except ValueError:
+                    # Skip non-integer values (e.g. the COMMAND header line).
+                    continue
+        examined = markdup_stats.get("EXAMINED", 0)
+        total_dup = markdup_stats.get("DUPLICATE TOTAL", 0)
+        duplicate_pairs = markdup_stats.get("DUPLICATE PAIR", 0)
+        duplicate_rate_percent = (
+            100.0 * total_dup / examined if examined > 0 else 0.0
+        )
+
     # Kraken Domain-level viral percent. The Kraken wrangled CSV contains a
     # single row with name == "Viruses" (the Domain row, tax_lvl == "D");
     # its percent already accounts for every species clade beneath it.
@@ -103,6 +129,11 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
         "html_report": html_report,
         "kaiju_report": kaiju_report,
         "blastn_report": blastn_report,
+        # Trailing columns added 2026-05-17 (Twist VRP audit). Left blank
+        # on legacy runs that pre-date the markdup_human rule; a
+        # column-dropped diff against an older run should still be clean.
+        "duplicate_pairs": duplicate_pairs,
+        "duplicate_rate_percent": duplicate_rate_percent,
     }])
 
 

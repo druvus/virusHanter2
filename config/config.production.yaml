@@ -28,6 +28,9 @@ PLOT_THRESHOLD: 5
 NUMBER_OF_PLOTS: 10
 PILON_MEM: "8G"
 
+# Additive QC additions from the 2026-05-17 Twist VRP audit.
+MULTIQC: "TRUE"
+
 # Uncomment if a secondary host is to be removed (e.g. mouse).
 # SECONDARY_HOST_INDEX: "/path/to/secondary/host"
 # SECONDARY_HOST_NAME: "Mouse"

@@ -65,6 +65,31 @@ rule bwa_align_to_kraken_hits:
         # Clean up index files
         shell("rm -rf {index_prefix}*")
 
+# Rule: Per-reference coverage statistics from the kraken-top viral BAM.
+# Sits alongside bam2plot rather than replacing it; outputs go to a
+# separate MOSDEPTH/ folder so they do not collide with the SVGs that
+# bam2plot owns via its directory() output.
+rule mosdepth_kraken_hits:
+    input:
+        bam=rules.bwa_align_to_kraken_hits.output.bam,
+    output:
+        summary=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt",
+        regions=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.regions.bed.gz",
+    params:
+        prefix=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}",
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/mosdepth.log"
+    threads: 4
+    conda:
+        "../envs/mosdepth.yaml"
+    shell:
+        """
+        mkdir -p $(dirname {params.prefix})
+        mosdepth -t {threads} --no-per-base --by 1000 \
+            {params.prefix} {input.bam} > {log} 2>&1
+        """
+
+
 # Rule: Generate coverage plots
 rule bam2plot:
     input:
@@ -133,6 +158,39 @@ rule generate_report:
             {params.secondary_args} \
             > {log} 2>&1
         """
+
+# Rule: Workflow-level MultiQC aggregation.
+# Runs after every per-sample report is finalised and after the
+# aggregate CSV is written, scans RESULT_FOLDER for fastp/samtools/
+# kraken/mosdepth/markdup outputs, and emits a single HTML for the
+# whole batch. Gated by the MULTIQC config flag in Snakefile rule all.
+rule multiqc:
+    input:
+        # The aggregated CSV is the latest "everything done" sentinel
+        # in the workflow, so depending on it pulls in all per-sample
+        # reports and stats files transitively.
+        run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
+        markdup=expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES),
+        mosdepth=expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
+    output:
+        html=f"{RESULT_FOLDER}/multiqc_report.html",
+        data=directory(f"{RESULT_FOLDER}/multiqc_data"),
+    params:
+        results_folder=RESULT_FOLDER,
+    log:
+        f"{RESULT_FOLDER}/logs/multiqc.log",
+    conda:
+        "../envs/multiqc.yaml"
+    shell:
+        """
+        multiqc \
+            --force \
+            --outdir {params.results_folder} \
+            --filename multiqc_report.html \
+            {params.results_folder} \
+            > {log} 2>&1
+        """
+
 
 # Rule: Aggregate run information across samples
 #

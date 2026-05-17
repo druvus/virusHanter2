@@ -67,6 +67,15 @@ properties:
     type: string
     pattern: "^[0-9]+[Gg]$"
     default: "50G"
+  MULTIQC:
+    type: string
+    enum: ["TRUE", "FALSE"]
+    default: "TRUE"
+  MEGAHIT_MEM_FRACTION:
+    type: number
+    minimum: 0.01
+    maximum: 1.0
+    default: 0.5
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.

@@ -66,6 +66,13 @@ read_len, number_reads, mapped_to_human_percent, kraken_virus_percent,
 kaiju_virus_percent, number_of_contigs, top_contigs_blastn,
 top_virus_kaiju, html_report, kaiju_report, blastn_report`.
 
+Two trailing columns (`duplicate_pairs`, `duplicate_rate_percent`)
+were added on 2026-05-17 from the new `markdup_human` rule. They are
+blank for any sample whose folder does not contain
+`logs/human_markdup_stats.txt`, so dropping them from the new CSV
+before diffing against an older one keeps the diff clean. See the
+"Additive 2026-05-17 audit changes" section below.
+
 ## Recent parity work
 
 The 2026-05-16 audit pass against `virusHanter/Snakefile` corrected
@@ -87,6 +94,41 @@ surfaced as differences in a real-sample diff. Headline items:
   is 500 and `PLOT_THRESHOLD` is 5.
 - `reportHanter` Kraken `filter_data` default cutoff is 0.001 (matching
   the original `plot_kraken`).
+
+## Additive 2026-05-17 audit changes
+
+Following a targeted audit for the Twist Comprehensive Virus Research
+Panel use case, three workflow-level additions were made. All are
+purely additive: existing rules, per-sample tabs, and the original
+fourteen `run_information_<batch>.csv` columns remain byte-identical
+to a pre-change run.
+
+- **`markdup_human` rule** (`rules/pre_processing.smk`): runs
+  `samtools sort -n` -> `samtools fixmate -m` -> `samtools sort` ->
+  `samtools markdup -s` on the bwa_human BAM and writes
+  `logs/human_markdup_stats.txt`. The original bwa_human BAM is not
+  modified; `remove_host` and every downstream rule continue to read
+  the un-marked file, so flagstat-derived columns are unchanged.
+- **`mosdepth_kraken_hits` rule** (`rules/post_processing.smk`):
+  produces per-reference coverage summaries
+  (`MOSDEPTH/<sample>.mosdepth.summary.txt` and
+  `.regions.bed.gz`) from the same BAM `bwa_align_to_kraken_hits`
+  emits. Sits alongside `bam2plot`'s `COVERAGE_PLOTS/` SVGs in a
+  separate directory; bam2plot's outputs are unchanged.
+- **`multiqc` rule** (`rules/post_processing.smk`): workflow-level
+  rule that emits `{RESULT_FOLDER}/multiqc_report.html`. Gated by the
+  `MULTIQC: "TRUE"` config flag (default on); set to `"FALSE"` to skip.
+
+Aggregated CSV: the two new columns `duplicate_pairs` and
+`duplicate_rate_percent` are appended after `blastn_report`. To
+diff against pre-2026-05-17 output, drop them first:
+
+```
+csvcut -C duplicate_pairs,duplicate_rate_percent,html_report \
+    run_information_<batch>.csv | sort > new.csv
+csvcut -C html_report old/run_information_<batch>.csv | sort > old.csv
+diff old.csv new.csv   # should be empty
+```
 
 ## Expected divergences
 
