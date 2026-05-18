@@ -82,6 +82,13 @@ not propagated yet.
   `https://zenodo.org/records/14886553`; extract the tarball and
   point `GENOMAD_DB` at the resulting `genomad_db/` directory.
 
+  Performance caveat: `genomad end-to-end` calls mmseqs2, which
+  does many small random reads against the ~228 k marker profiles.
+  Running with the DB on an external USB drive is impractical
+  (9+ hour stall observed on this workstation with the geNomad DB
+  on LaCie). For real-data runs, stage the DB on local SSD or a
+  fast network filesystem before flipping `GENOMAD: "TRUE"`.
+
 ## Apple Silicon / RAM-limited host notes
 
 - Kraken2 with the pluspf hash needs more RAM than is available on a

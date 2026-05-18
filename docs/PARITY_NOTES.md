@@ -136,7 +136,10 @@ to a pre-change run.
   the Pilon-polished contigs and writes a per-sample summary TSV
   under `GENOMAD/<sample>_summary/`. Does not merge into
   `merged_csv` or feed the report, so existing tabs/columns stay
-  byte-identical regardless of the flag.
+  byte-identical regardless of the flag. Practical note: the
+  bundled mmseqs2 step is heavily I/O-bound, so the geNomad DB
+  must live on local SSD or fast networked storage — a USB-attached
+  DB stalls for hours. See `docs/REFERENCE_DBS.md`.
 
 Aggregated CSV: the two new columns `duplicate_pairs` and
 `duplicate_rate_percent` are appended after `blastn_report`. To
