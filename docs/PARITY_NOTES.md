@@ -23,7 +23,7 @@ enough that all required databases on the workstation are still consistent.
 
    ```
    conda activate virushanter
-   snakemake --use-conda --cores <N> --configfile config/config.yaml
+   snakemake --sdm conda --cores <N> --configfile config/config.yaml
    ```
 
 3. Compare outputs for each sample.
@@ -31,7 +31,7 @@ enough that all required databases on the workstation are still consistent.
 ### Per-sample HTML
 
 The HTML reports are not byte-comparable (Panel embeds build-time
-timestamps and randomized DOM ids). Compare instead by opening both files
+timestamps and randomised DOM ids). Compare instead by opening both files
 side-by-side and checking each tab:
 
 - Alignment Stats: total reads, percent mapped to human (and to the

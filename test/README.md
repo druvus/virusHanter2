@@ -26,7 +26,7 @@ gzipped reads alongside the mock databases.
 ./test/run_smoke.sh --full     # auto-degrades when CheckV is stubbed
 ```
 
-`build_fixtures.sh` synthesizes everything in `test/mini_db/` except a real
+`build_fixtures.sh` synthesises everything in `test/mini_db/` except a real
 CheckV database. Tools required on `$PATH` to build the fixtures:
 
 | Tool | Used for |
