@@ -29,6 +29,9 @@ PILON_MEM: "2G"
 # explicitly when verifying that path.
 MULTIQC: "FALSE"
 # Parity-preserving defaults for the smoke. Flip to "TRUE" to exercise
-# the optional steps end-to-end.
+# the optional steps end-to-end. Note: QUAST cannot run on Apple
+# Silicon because bioconda lacks an osx-arm64 build of quast; on a
+# Linux host or with CONDA_SUBDIR=osx-64 set, flipping QUAST: "TRUE"
+# is fine and the smoke materialises the env automatically.
 DEDUPLICATE: "FALSE"
 QUAST: "FALSE"
