@@ -24,7 +24,6 @@ VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_virus
 
 # Match the original virusHanter defaults so a parity diff is meaningful.
 CONTIG_LENGTH: 500
-PLOT_THRESHOLD: 5
 NUMBER_OF_PLOTS: 10
 # Window size (bp) for mosdepth --by. Controls the resolution of the
 # coverage trace rendered by reporthanter. 100 bp suits typical viral

@@ -57,12 +57,13 @@ properties:
     type: integer
     minimum: 1
     default: 500
-  PLOT_THRESHOLD:
-    type: integer
-    minimum: 0
   NUMBER_OF_PLOTS:
     type: integer
     minimum: 1
+    description: |
+      Top-N Kraken viral hits used by `bwa_align_to_kraken_hits` to
+      select references for the coverage BAM, and the same cap drives
+      the per-virus CSV row count emitted by `per_virus_metrics`.
   PILON_MEM:
     type: string
     pattern: "^[0-9]+[Gg]$"
@@ -133,7 +134,6 @@ required:
   - BLASTN_DB
   - CHECKV_DB
   - VIRUS_PARQUET
-  - PLOT_THRESHOLD
   - NUMBER_OF_PLOTS
 
 additionalProperties: false

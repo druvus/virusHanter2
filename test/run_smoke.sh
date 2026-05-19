@@ -24,14 +24,14 @@ MINI="test/mini_db"
 # Apple Silicon detection. Historically this script forced
 # CONDA_SUBDIR=osx-64 because several bioconda tools (bwa, samtools, ...)
 # only shipped osx-64 builds, but the Rosetta path then segfaulted on
-# AVX/SIMD-heavy tools (MEGAHIT, kaiju, polars in bam2plot). The
-# upstream bioconda packages we depend on now ship native osx-arm64 (or
-# noarch) builds, so we no longer pin the subdir and let conda choose.
-# Kraken2 with the pluspf database still needs more RAM than a typical
-# laptop has; on Apple Silicon prefer the standard DB or use Linux.
-APPLE_SILICON=0
+# AVX/SIMD-heavy tools (MEGAHIT, kaiju). The upstream bioconda packages
+# we depend on now ship native osx-arm64 (or noarch) builds, so we no
+# longer pin the subdir and let conda choose. Kraken2 with the pluspf
+# database still needs more RAM than a typical laptop has; on Apple
+# Silicon prefer the standard DB or use Linux. QUAST currently lacks
+# an osx-arm64 build, so flip QUAST: "FALSE" or set
+# CONDA_SUBDIR=osx-64 if you enable the assembly-QC stage on a Mac.
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
-    APPLE_SILICON=1
     echo "[smoke] Apple Silicon detected; using native osx-arm64 envs."
     echo "[smoke] If a rule fails with 'PackagesNotFoundError', that env"
     echo "[smoke] still lacks an arm64 build and may need CONDA_SUBDIR=osx-64."
@@ -65,7 +65,7 @@ run_full() {
         checkv_ready=1
     fi
 
-    if [[ "$checkv_ready" == "1" && "$APPLE_SILICON" == "0" ]]; then
+    if [[ "$checkv_ready" == "1" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"
         snakemake --sdm conda --cores 2 --configfile "$CONFIG"
         local sample_dir="test/results/test"
@@ -74,29 +74,20 @@ run_full() {
         [[ -s "$html"     ]] || { echo "[smoke] FAIL: missing $html";     exit 1; }
         [[ -s "$run_csv"  ]] || { echo "[smoke] FAIL: missing $run_csv";  exit 1; }
         echo "[smoke] OK: $html, $run_csv"
-    elif [[ "$checkv_ready" == "1" && "$APPLE_SILICON" == "1" ]]; then
-        echo "[smoke] CheckV DB present, but Apple Silicon / Rosetta blocks bam2plot."
-        echo "[smoke] Running everything that does not need bam2plot."
-        snakemake --sdm conda --cores 2 --configfile "$CONFIG" \
-            --until merge_checkv_blastn kaiju_to_table
-        local merged="test/results/test/test_R/CHECKV/test_R.merged.csv"
-        [[ -s "$merged" ]] || { echo "[smoke] FAIL: missing $merged"; exit 1; }
-        echo "[smoke] OK: $merged"
-        echo "[smoke] (bam2plot + generate_report + aggregate skipped; run on Linux for the HTML report.)"
     else
         echo "[smoke] CheckV DB is stubbed; running everything that doesn't depend on CheckV"
-        # Three terminal rules whose combined dependencies cover the
-        # assembly branch, the classification branch, and the coverage
-        # branch. CheckV / merge_checkv_blastn / generate_report /
+        # Terminal rules whose combined dependencies cover the assembly
+        # branch, the classification branch, and the coverage branch.
+        # CheckV / merge_checkv_blastn / generate_report /
         # aggregate_run_information stay out of this set.
         snakemake --sdm conda --cores 2 --configfile "$CONFIG" \
-            --until blastn bam2plot kaiju_to_table
+            --until blastn mosdepth_kraken_hits kaiju_to_table
         local sd="test/results/test/test_R"
         local expected=(
             "$sd/BLASTN/test_R.contigs.blastn.csv"
             "$sd/KAIJU/test_R.kaiju.table.tsv"
             "$sd/KRAKEN/test_R.kraken.csv"
-            "$sd/COVERAGE_PLOTS"
+            "$sd/MOSDEPTH/test_R.regions.bed.gz"
         )
         for f in "${expected[@]}"; do
             [[ -e "$f" ]] || { echo "[smoke] FAIL: missing $f"; exit 1; }

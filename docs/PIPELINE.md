@@ -31,8 +31,7 @@ included into a single `Snakefile`. Rules are grouped by stage.
 ### Post-processing + reporting — `rules/post_processing.smk`
 
 15. **`bwa_align_to_kraken_hits`** — pick the top-N Kraken viral taxa, look up their reference sequences in `VIRUS_PARQUET`, build a BWA index of just those references, and map the host-unmapped reads.
-16. **`bam2plot`** — SVG coverage profiles for references that exceed `PLOT_THRESHOLD`.
-17. **`mosdepth_kraken_hits`** — numeric per-reference coverage stats with `--thresholds 1,5,10`.
+16. **`mosdepth_kraken_hits`** — numeric per-reference coverage stats with `--by COVERAGE_WINDOW` and `--thresholds 1,5,10`. The `regions.bed.gz` is consumed by `reporthanter` to render interactive coverage traces per reference (replaces the retired `bam2plot` SVG step).
 18. **`generate_report`** — invoke `reporthanter` to render the per-sample interactive HTML.
 19. **`aggregate_run_information`** — concatenate per-sample summaries into `run_information_<batch>.csv` (parity-locked to the original `virusHanter`; see [PARITY_NOTES.md](PARITY_NOTES.md)).
 20. **`per_virus_metrics`** + **`aggregate_per_virus`** — join Kraken/Kaiju/BLASTN/mosdepth into per-(sample, virus) rows and write the collaborator-facing `per_virus_<batch>.csv`. Schema: [PER_VIRUS_OUTPUT.md](PER_VIRUS_OUTPUT.md).
@@ -61,8 +60,7 @@ the basename of `SAMPLES`.
 | `CHECKV/<sample>.contamination.tsv`, `<sample>.merged.csv` | CheckV call + BLASTN+CheckV inner join. |
 | `GENOMAD/<sample>_summary/<sample>_virus_summary.tsv` | only when `GENOMAD: "TRUE"`. |
 | `BWA_KRAKEN/<sample>_kraken.bam` + `kraken_top_viruses.fasta` | mapping to top-N Kraken viral references. |
-| `COVERAGE_PLOTS/*.svg` | per-reference coverage profiles. |
-| `MOSDEPTH/<sample>.mosdepth.summary.txt`, `.regions.bed.gz`, `.thresholds.bed.gz` | numeric coverage. |
+| `MOSDEPTH/<sample>.mosdepth.summary.txt`, `.regions.bed.gz`, `.thresholds.bed.gz` | numeric coverage (drives the per-reference traces in the HTML report). |
 | `REPORT/<sample>.html` | per-sample interactive report. |
 | `<sample>.per_virus.csv` | one row per detected Kraken viral taxid. |
 

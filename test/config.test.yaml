@@ -20,7 +20,6 @@ CHECKV_DB: "test/mini_db/checkv"
 VIRUS_PARQUET: "test/mini_db/virus.parquet"
 
 CONTIG_LENGTH: 100
-PLOT_THRESHOLD: 1
 NUMBER_OF_PLOTS: 3
 # Small bin so the 5 kb synthetic virus produces a visibly resolved trace.
 COVERAGE_WINDOW: 50

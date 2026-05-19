@@ -35,11 +35,8 @@ CHECKV_DB: "/path/to/checkv/database"
 # Path to the Parquet file containing viral sequences (used for coverage plots)
 VIRUS_PARQUET: "/path/to/virus_sequences.parquet"
 
-# Coverage threshold for generating coverage plots. Matches the original
-# virusHanter default.
-PLOT_THRESHOLD: 5
-
-# Number of top references to include in coverage plots
+# Number of top Kraken viral hits to map reads against. Same cap drives
+# the per-virus CSV row count.
 NUMBER_OF_PLOTS: 10
 
 # Window size (bp) for mosdepth --by; controls coverage-trace resolution.

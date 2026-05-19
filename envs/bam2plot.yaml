@@ -1,6 +1,0 @@
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - bam2plot>=0.4
-  - samtools>=1.18

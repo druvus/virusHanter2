@@ -91,7 +91,9 @@ surfaced as differences in a real-sample diff. Headline items:
 - `scripts/functions.py:run_blastn` sets `BLASTDB` to the database
   parent directory so blastn can find any `taxdb.*` auxiliary files.
 - `config/config.yaml` defaults align with the original: `CONTIG_LENGTH`
-  is 500 and `PLOT_THRESHOLD` is 5.
+  is 500. (The `PLOT_THRESHOLD` knob from the original `virusHanter`
+  was retired together with the `bam2plot` rule; see the 2026-05-19
+  section below.)
 - `reportHanter` Kraken `filter_data` default cutoff is 0.001 (matching
   the original `plot_kraken`).
 
@@ -113,8 +115,9 @@ to a pre-change run.
   produces per-reference coverage summaries
   (`MOSDEPTH/<sample>.mosdepth.summary.txt` and
   `.regions.bed.gz`) from the same BAM `bwa_align_to_kraken_hits`
-  emits. Sits alongside `bam2plot`'s `COVERAGE_PLOTS/` SVGs in a
-  separate directory; bam2plot's outputs are unchanged.
+  emits. Since the 2026-05-19 retirement of `bam2plot`, the
+  `regions.bed.gz` is also what drives the interactive coverage
+  traces in the per-sample HTML report.
 - **`multiqc` rule** (`rules/post_processing.smk`): workflow-level
   rule that emits `{RESULT_FOLDER}/multiqc_report.html`. Gated by the
   `MULTIQC: "TRUE"` config flag (default on); set to `"FALSE"` to skip.
@@ -184,6 +187,25 @@ parity-locked columns of `run_information_<batch>.csv` are not
 touched in either case, and the per-sample HTML report is unchanged
 unless and until reportHanter is taught to surface QUAST metrics
 (separate follow-up).
+
+## 2026-05-19: `bam2plot` retired
+
+The `bam2plot` rule that produced `COVERAGE_PLOTS/*.svg` and the
+matching `PLOT_THRESHOLD` config key have been removed. Since
+`mosdepth_kraken_hits` now feeds an interactive coverage trace per
+reference into the report directly (via the per-sample
+`regions.bed.gz`), the SVGs were never read and added a heavy
+dependency that segfaulted on Apple Silicon. Practical impact:
+
+- `envs/bam2plot.yaml` deleted; the smoke runner no longer carries
+  Apple-Silicon-specific workarounds.
+- `--coverage_folder` is no longer a flag of the `reporthanter` CLI
+  or a parameter of `create_report` / `ReportGenerator`. The CLI now
+  requires `--mosdepth_regions`.
+- `COVERAGE_PLOTS/` directories from previous runs can be removed
+  freely; nothing in the current workflow reads them.
+- Parity-locked columns of `run_information_<batch>.csv` are
+  unaffected because none of them sourced data from `bam2plot`.
 
 ## Expected divergences
 

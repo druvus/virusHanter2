@@ -20,8 +20,7 @@ Required keys:
 | `BLASTN_DB` | BLAST nucleotide database **prefix** (e.g. the `.nal` alias name). The runner derives `BLASTDB` from the parent directory so taxdb lookups work. |
 | `CHECKV_DB` | CheckV database directory. |
 | `VIRUS_PARQUET` | Parquet with columns `(name, sequence, tax_id)` used to pick references for the kraken-top-N coverage step. See [REFERENCE_DBS.md](REFERENCE_DBS.md) for the build recipe. |
-| `PLOT_THRESHOLD` | Minimum mean coverage for a reference to appear in the SVG coverage plots (default `5`). |
-| `NUMBER_OF_PLOTS` | Top-N Kraken viral hits to include (default `10`). Same cap drives the per-virus CSV row count. |
+| `NUMBER_OF_PLOTS` | Top-N Kraken viral hits to include (default `10`). Drives both the references mapped by `bwa_align_to_kraken_hits` and the per-virus CSV row count. |
 
 Optional keys:
 
@@ -34,6 +33,9 @@ Optional keys:
 | `MULTIQC` | `"TRUE"` | Emit `{batch}/multiqc_report.html` at the end of the run. |
 | `GENOMAD` | `"FALSE"` | Run geNomad alongside CheckV. Requires `GENOMAD_DB`. |
 | `GENOMAD_DB` | `""` | Path to the populated `genomad_db/` directory. See [REFERENCE_DBS.md](REFERENCE_DBS.md#sources-for-the-inputs). |
+| `COVERAGE_WINDOW` | `100` | Window size in base pairs passed to `mosdepth --by`. Smaller values give a finer coverage trace in the report and a larger `regions.bed.gz`. |
+| `DEDUPLICATE` | `"FALSE"` | Exclude PCR duplicates from the host-removed reads that feed MEGAHIT and the BWA-to-Kraken-hits coverage step. Off by default to preserve parity with the original virusHanter outputs. |
+| `QUAST` | `"FALSE"` | Run QUAST on each sample's MEGAHIT contigs and feed it to MultiQC. Currently lacks an osx-arm64 bioconda build, so on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
 | `SECONDARY_HOST_INDEX` | unset | BWA prefix for a second host (e.g. mouse). Adds a second host-removal stage when set. |
 | `SECONDARY_HOST_NAME` | unset | Display name shown in the per-sample report. |
 
@@ -66,9 +68,9 @@ Each rule declares its own env in `envs/`:
 | `envs/pilon.yaml` | pilon, bwa, samtools, openjdk |
 | `envs/blastn.yaml` | blast, pandas, pyfastx |
 | `envs/checkv.yaml` | checkv |
-| `envs/bam2plot.yaml` | bam2plot (pip), samtools, polars-lts-cpu |
 | `envs/mosdepth.yaml` | mosdepth |
 | `envs/multiqc.yaml` | multiqc |
+| `envs/quast.yaml` | quast (only used when `QUAST: "TRUE"`) |
 | `envs/genomad.yaml` | genomad |
 | `envs/panel.yaml` | python, pandas, pyfastx, pyarrow (wrangling rules) |
 | `envs/reporthanter.yaml` | python 3.12 + pip-installed `reportHanter` from GitHub |

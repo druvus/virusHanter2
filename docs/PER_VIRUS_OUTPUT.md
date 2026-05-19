@@ -3,13 +3,14 @@
 The collaborator-facing output is `per_virus_<batch>.csv` written at
 the top of each batch's result folder. One row per detected Kraken
 viral taxid, per sample, capped at `NUMBER_OF_PLOTS` (config;
-default 10). `bam2plot` honours the same cap when writing coverage
-SVGs, so the CSV rows and the SVG set stay aligned.
+default 10).
 
 `bwa_align_to_kraken_hits` itself builds a BWA index over a wider
 Kraken top-20 (hardcoded, to match the original `virusHanter`); the
 narrower `NUMBER_OF_PLOTS` cap is applied downstream by
-`per_virus_metrics` and `bam2plot`.
+`per_virus_metrics`. Coverage traces for the same references are
+rendered in the per-sample HTML report from the mosdepth
+`regions.bed.gz` produced by `mosdepth_kraken_hits`.
 
 ## Per-sample, per-virus schema
 

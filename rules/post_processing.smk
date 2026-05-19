@@ -11,7 +11,6 @@ from scripts.functions import read_file_as_blob
 THREADS = config["THREADS"]
 RESULT_FOLDER = os.path.join(config["RESULTS_FOLDER"], Path(config["SAMPLES"]).name)
 VIRUS_PARQUET = config["VIRUS_PARQUET"]
-PLOT_THRESHOLD = config["PLOT_THRESHOLD"]
 NUMBER_OF_PLOTS = config["NUMBER_OF_PLOTS"]
 # Window size (bp) for mosdepth's --by flag. Smaller values give a
 # higher-resolution coverage trace in the report at the cost of a
@@ -73,9 +72,9 @@ rule bwa_align_to_kraken_hits:
         shell("rm -rf {index_prefix}*")
 
 # Rule: Per-reference coverage statistics from the kraken-top viral BAM.
-# Sits alongside bam2plot rather than replacing it; outputs go to a
-# separate MOSDEPTH/ folder so they do not collide with the SVGs that
-# bam2plot owns via its directory() output.
+# Output is a mosdepth regions BED keyed by reference, consumed by
+# reporthanter to render interactive Altair coverage traces in the
+# per-sample HTML report.
 rule mosdepth_kraken_hits:
     input:
         bam=rules.bwa_align_to_kraken_hits.output.bam,
@@ -104,31 +103,6 @@ rule mosdepth_kraken_hits:
         """
 
 
-# Rule: Generate coverage plots
-rule bam2plot:
-    input:
-        bam=rules.bwa_align_to_kraken_hits.output.bam,
-    output:
-        coverage_plots_dir=directory(f"{RESULT_FOLDER}/{{sample}}/COVERAGE_PLOTS"),
-    params:
-        threshold=PLOT_THRESHOLD,
-        num_refs=NUMBER_OF_PLOTS,
-    log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/bam2plot.log"
-    conda:
-        "../envs/bam2plot.yaml"
-    shell:
-        """
-        mkdir -p {output.coverage_plots_dir}
-        bam2plot from_bam \
-            -b {input.bam} \
-            -o {output.coverage_plots_dir} \
-            -t {params.threshold} \
-            -p svg \
-            -n {params.num_refs} \
-            > {log} 2>&1
-        """
-
 # Rule: Generate interactive report via the reporthanter CLI
 rule generate_report:
     input:
@@ -142,7 +116,6 @@ rule generate_report:
         # aggregate_run_information instead.
         kraken_report=rules.kraken.output.kraken_report,
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
-        coverage_dir=rules.bam2plot.output.coverage_plots_dir,
         mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
         # When QUAST is enabled, surface its report inside the HTML
         # report as an Alignment Stats sub-tab.
@@ -187,7 +160,6 @@ rule generate_report:
             --kaiju_table {input.kaiju_table} \
             --fastp_json {input.fastp_json} \
             --flagstat_file {input.flagstat} \
-            --coverage_folder {input.coverage_dir} \
             --mosdepth_regions {input.mosdepth_regions} \
             {params.quast_args} \
             --output {output.report_html} \
