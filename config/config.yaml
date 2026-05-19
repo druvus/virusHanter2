@@ -42,6 +42,9 @@ PLOT_THRESHOLD: 5
 # Number of top references to include in coverage plots
 NUMBER_OF_PLOTS: 10
 
+# Window size (bp) for mosdepth --by; controls coverage-trace resolution.
+COVERAGE_WINDOW: 100
+
 # Optional: run MultiQC over the whole batch at the end of the workflow
 # and write {RESULTS_FOLDER}/<batch>/multiqc_report.html. Set to "FALSE"
 # to skip. Default is "TRUE".

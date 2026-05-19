@@ -11,6 +11,11 @@ RESULT_FOLDER = os.path.join(config["RESULTS_FOLDER"], Path(config["SAMPLES"]).n
 VIRUS_PARQUET = config["VIRUS_PARQUET"]
 PLOT_THRESHOLD = config["PLOT_THRESHOLD"]
 NUMBER_OF_PLOTS = config["NUMBER_OF_PLOTS"]
+# Window size (bp) for mosdepth's --by flag. Smaller values give a
+# higher-resolution coverage trace in the report at the cost of a
+# larger regions.bed.gz; 100 bp is a sensible default for the viral
+# references this pipeline targets.
+COVERAGE_WINDOW = int(config.get("COVERAGE_WINDOW", 100))
 SECONDARY_HOST_NAME = config.get("SECONDARY_HOST_NAME", "")
 
 # Rule: Align reads to top Kraken2 viral hits
@@ -82,6 +87,7 @@ rule mosdepth_kraken_hits:
         thresholds=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.thresholds.bed.gz",
     params:
         prefix=f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}",
+        window=COVERAGE_WINDOW,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/mosdepth.log"
     threads: 4
@@ -90,7 +96,7 @@ rule mosdepth_kraken_hits:
     shell:
         """
         mkdir -p $(dirname {params.prefix})
-        mosdepth -t {threads} --no-per-base --by 1000 \
+        mosdepth -t {threads} --no-per-base --by {params.window} \
             --thresholds 1,5,10 \
             {params.prefix} {input.bam} > {log} 2>&1
         """

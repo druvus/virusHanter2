@@ -26,6 +26,10 @@ VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_virus
 CONTIG_LENGTH: 500
 PLOT_THRESHOLD: 5
 NUMBER_OF_PLOTS: 10
+# Window size (bp) for mosdepth --by. Controls the resolution of the
+# coverage trace rendered by reporthanter. 100 bp suits typical viral
+# references; lower for short refs, higher for very long ones.
+COVERAGE_WINDOW: 100
 PILON_MEM: "8G"
 
 # Additive QC additions from the 2026-05-17 Twist VRP audit.

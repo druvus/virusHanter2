@@ -88,6 +88,14 @@ properties:
     minimum: 0.01
     maximum: 1.0
     default: 0.5
+  COVERAGE_WINDOW:
+    type: integer
+    minimum: 1
+    default: 100
+    description: |
+      Window size in base pairs passed to `mosdepth --by`. Controls
+      the resolution of the coverage trace rendered by reporthanter.
+      Smaller values give a finer trace and a larger regions.bed.gz.
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.
