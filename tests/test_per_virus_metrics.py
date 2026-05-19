@@ -160,6 +160,7 @@ def test_mosdepth_thresholds_sums_per_chrom(tmp_path):
 def test_attribute_contigs_prefers_accession_match():
     blastn = pd.DataFrame(
         {
+            "name": ["k21_0_pilon", "k21_1_pilon"],
             "match_name": ["irrelevant header text", "Murine reference seq"],
             "accession": ["NC_001.1", "NC_999.1"],
         }
@@ -169,23 +170,24 @@ def test_attribute_contigs_prefers_accession_match():
     # unambiguous: only the second row's first token ("Murine") matches
     # taxid 7.
     taxid_to_name = {42: "Phage A", 7: "Murine virus"}
-    counts = attribute_contigs(blastn, parquet_acc_to_tax, taxid_to_name)
+    contigs = attribute_contigs(blastn, parquet_acc_to_tax, taxid_to_name)
     # First row -> taxid 42 via accession (parquet hit), regardless of
     # the misleading match_name.
-    assert counts[42] == 1
+    assert contigs[42] == ["k21_0_pilon"]
     # Second row -> taxid 7 via substring of first token.
-    assert counts[7] == 1
+    assert contigs[7] == ["k21_1_pilon"]
 
 
 def test_attribute_contigs_with_no_match_returns_empty():
     blastn = pd.DataFrame(
         {
+            "name": ["k21_0_pilon"],
             "match_name": ["No such virus"],
             "accession": ["XX_000.0"],
         }
     )
-    counts = attribute_contigs(blastn, {}, {42: "Phage A"})
-    assert counts == {}
+    contigs = attribute_contigs(blastn, {}, {42: "Phage A"})
+    assert contigs == {}
 
 
 def test_build_per_virus_rows_aggregates_multi_reference_taxid(tmp_path):

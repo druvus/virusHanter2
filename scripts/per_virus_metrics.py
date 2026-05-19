@@ -190,16 +190,17 @@ def attribute_contigs(
     blastn_df: pd.DataFrame,
     parquet_acc_to_tax: dict[str, int],
     taxid_to_name: dict[int, str],
-) -> dict[int, int]:
-    """Count BLASTN-merged rows attributable to each Kraken taxid.
+) -> dict[int, list[str]]:
+    """Group BLASTN-merged rows by the Kraken taxid each is attributable to.
 
     Two-tier match: by accession (preferred), then by case-insensitive
     substring of the BLASTN `match_name`'s first token in the Kraken
-    name.
+    name. Returns ``{taxid: [contig_name, ...]}``; per-taxid contig
+    counts are then ``len(values)``.
     """
-    counts: dict[int, int] = {}
+    by_taxid: dict[int, list[str]] = {}
     if blastn_df.empty:
-        return counts
+        return by_taxid
     for row in blastn_df.itertuples():
         tid: int | None = None
         # Tier 1: accession lookup.
@@ -219,8 +220,36 @@ def attribute_contigs(
                         tid = candidate_tid
                         break
         if tid is not None:
-            counts[tid] = counts.get(tid, 0) + 1
-    return counts
+            contig = getattr(row, "name", None)
+            by_taxid.setdefault(tid, []).append(
+                "" if contig is None or pd.isna(contig) else str(contig)
+            )
+    return by_taxid
+
+
+def parse_genomad_summary(path: Path) -> dict[str, float]:
+    """Parse a geNomad ``<sample>_virus_summary.tsv`` into a per-contig
+    map of ``{seq_name_first_token: virus_score}``.
+
+    geNomad scores contigs and reports a virus_score in [0, 1]; rows that
+    do not pass geNomad's own viral threshold are absent from this file,
+    so any contig in the dict is a geNomad-called virus. Missing or
+    unparseable scores are dropped silently.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return {}
+    df = pd.read_csv(path, sep="\t")
+    if "seq_name" not in df.columns or "virus_score" not in df.columns:
+        return {}
+    out: dict[str, float] = {}
+    for row in df.itertuples():
+        try:
+            seq = str(row.seq_name).split()[0]
+            score = float(row.virus_score)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        out[seq] = score
+    return out
 
 
 def build_per_virus_rows(
@@ -236,6 +265,7 @@ def build_per_virus_rows(
     total_reads: int,
     human_reads: int,
     top_n: int = 20,
+    genomad_summary: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """Top-level join. Returns a DataFrame with the schema documented in
     `docs/PER_VIRUS_OUTPUT.md`.
@@ -268,7 +298,7 @@ def build_per_virus_rows(
 
     kaiju_by_tid = kaiju_lookup(kaiju_df)
     taxid_to_name = {int(r.taxonomy_id): r.name for r in viral.itertuples()}
-    contig_counts = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
+    contigs_by_taxid = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
 
     date_part = run_name.split("_")[0] if run_name else ""
 
@@ -297,30 +327,43 @@ def build_per_virus_rows(
         )
 
         kaiju_row = kaiju_by_tid.get(taxid, {})
-        rows.append(
-            {
-                "run_name": run_name,
-                "sample_name": sample_name,
-                "date": date_part,
-                "virus_name_kraken": v.name,
-                "virus_taxid": taxid,
-                "virus_name_kaiju": kaiju_row.get("taxon_name", ""),
-                "contigs": contig_counts.get(taxid, 0),
-                "virus_reads_kraken2": virus_reads_kraken,
-                "other_reads": other_reads,
-                "total_reads": total_reads,
-                "human_reads": human_reads,
-                "human_reads_percent": human_pct,
-                "non_human_reads": non_human_reads,
-                "non_human_reads_percent": non_human_pct,
-                "note": "",
-                "specific_virus_rpm": specific_rpm,
-                "all_virus_rpm": all_virus_rpm,
-                "completeness_5x": completeness_5x,
-                "bases_above_5x": total_ge5x,
-                "mean_coverage": mean_cov,
-            }
-        )
+        attributed_contigs = contigs_by_taxid.get(taxid, [])
+
+        # geNomad columns are additive trailing columns: present only
+        # when a geNomad summary was supplied. Counts the attributed
+        # contigs that geNomad called viral; ``max_score`` is the
+        # highest virus_score among them (NaN when none qualify).
+        row = {
+            "run_name": run_name,
+            "sample_name": sample_name,
+            "date": date_part,
+            "virus_name_kraken": v.name,
+            "virus_taxid": taxid,
+            "virus_name_kaiju": kaiju_row.get("taxon_name", ""),
+            "contigs": len(attributed_contigs),
+            "virus_reads_kraken2": virus_reads_kraken,
+            "other_reads": other_reads,
+            "total_reads": total_reads,
+            "human_reads": human_reads,
+            "human_reads_percent": human_pct,
+            "non_human_reads": non_human_reads,
+            "non_human_reads_percent": non_human_pct,
+            "note": "",
+            "specific_virus_rpm": specific_rpm,
+            "all_virus_rpm": all_virus_rpm,
+            "completeness_5x": completeness_5x,
+            "bases_above_5x": total_ge5x,
+            "mean_coverage": mean_cov,
+        }
+        if genomad_summary is not None:
+            matched = [
+                genomad_summary[c]
+                for c in attributed_contigs
+                if c in genomad_summary
+            ]
+            row["genomad_viral_contigs"] = len(matched)
+            row["genomad_max_virus_score"] = max(matched) if matched else np.nan
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -345,6 +388,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--flagstat", required=True, type=Path)
     p.add_argument("--virus-parquet", required=True, type=Path)
     p.add_argument("--top-n", type=int, default=20)
+    p.add_argument(
+        "--genomad-summary",
+        type=Path,
+        default=None,
+        help=(
+            "Optional geNomad <sample>_virus_summary.tsv. When supplied, "
+            "two trailing columns (genomad_viral_contigs and "
+            "genomad_max_virus_score) are appended to the per-virus CSV."
+        ),
+    )
     p.add_argument("--out", required=True, type=Path)
     return p.parse_args()
 
@@ -365,6 +418,12 @@ def main() -> None:
     total_reads = parse_fastp_total_reads(args.fastp_json.read_text())
     _, human_reads = parse_flagstat(args.flagstat.read_text())
 
+    genomad_summary = (
+        parse_genomad_summary(args.genomad_summary)
+        if args.genomad_summary is not None
+        else None
+    )
+
     df = build_per_virus_rows(
         run_name=args.run_name,
         sample_name=args.sample_name,
@@ -377,6 +436,7 @@ def main() -> None:
         total_reads=total_reads,
         human_reads=human_reads,
         top_n=args.top_n,
+        genomad_summary=genomad_summary,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)

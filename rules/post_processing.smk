@@ -144,6 +144,13 @@ rule generate_report:
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
         coverage_dir=rules.bam2plot.output.coverage_plots_dir,
         mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
+        # When QUAST is enabled, surface its report inside the HTML
+        # report as an Alignment Stats sub-tab.
+        **(
+            {"quast_report": rules.quast_megahit.output.report_tsv}
+            if config.get("QUAST", "FALSE") == "TRUE"
+            else {}
+        ),
     output:
         report_html=f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html",
     conda:
@@ -163,6 +170,13 @@ rule generate_report:
         # is for filesystem paths; this affects only the display name
         # shown in the report header.
         display_name=lambda wildcards: re.sub(r"_R$", "", wildcards.sample),
+        quast_args=(
+            lambda wildcards, input: (
+                f"--quast_report {input.quast_report}"
+                if hasattr(input, "quast_report")
+                else ""
+            )
+        ),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
     shell:
@@ -175,6 +189,7 @@ rule generate_report:
             --flagstat_file {input.flagstat} \
             --coverage_folder {input.coverage_dir} \
             --mosdepth_regions {input.mosdepth_regions} \
+            {params.quast_args} \
             --output {output.report_html} \
             --sample_name {params.display_name} \
             {params.secondary_args} \
@@ -198,11 +213,26 @@ rule per_virus_metrics:
         fastp_json=rules.fastp.output.json_report,
         flagstat=rules.remove_host.output.flagstat,
         virus_parquet=VIRUS_PARQUET,
+        # When geNomad is enabled, take its per-sample summary as an
+        # extra input. The flag is read from `config` so the input list
+        # is evaluated at rule-build time, not via a `lambda`.
+        **(
+            {"genomad_summary": rules.genomad.output.summary}
+            if config.get("GENOMAD", "FALSE") == "TRUE"
+            else {}
+        ),
     output:
         per_virus_csv=f"{RESULT_FOLDER}/{{sample}}/{{sample}}.per_virus.csv",
     params:
         run_name=Path(config["SAMPLES"]).name,
         top_n=NUMBER_OF_PLOTS,
+        genomad_args=(
+            lambda wildcards, input: (
+                f"--genomad-summary {input.genomad_summary}"
+                if hasattr(input, "genomad_summary")
+                else ""
+            )
+        ),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/per_virus_metrics.log"
     conda:
@@ -221,6 +251,7 @@ rule per_virus_metrics:
             --flagstat {input.flagstat} \
             --virus-parquet {input.virus_parquet} \
             --top-n {params.top_n} \
+            {params.genomad_args} \
             --out {output.per_virus_csv} \
             > {log} 2>&1
         """
