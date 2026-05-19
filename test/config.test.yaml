@@ -28,3 +28,7 @@ PILON_MEM: "2G"
 # The smoke does not need a workflow-level MultiQC report. Enable it
 # explicitly when verifying that path.
 MULTIQC: "FALSE"
+# Parity-preserving defaults for the smoke. Flip to "TRUE" to exercise
+# the optional steps end-to-end.
+DEDUPLICATE: "FALSE"
+QUAST: "FALSE"

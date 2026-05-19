@@ -26,6 +26,11 @@ PILON_MEM_MB = int(PILON_MEM.rstrip("Gg")) * 1024
 RUN_GENOMAD = config.get("GENOMAD", "FALSE") == "TRUE"
 GENOMAD_DB = config.get("GENOMAD_DB", "")
 
+# Optional QUAST assembly assessment (off by default). When TRUE,
+# `rule quast_megahit` runs against each sample's MEGAHIT contigs and
+# its report dir is fed to MultiQC for batch-level QC.
+RUN_QUAST = config.get("QUAST", "FALSE") == "TRUE"
+
 
 # Rule: De novo assembly with MEGAHIT
 rule megahit:
@@ -95,6 +100,34 @@ rule megahit:
             with open(output.contigs, "w") as f:
                 f.write(">DUMMY_CONTIG\n")
                 f.write("TTAACCTTGG" * 20 + "\n")
+
+
+# Rule: QUAST assembly assessment on the raw MEGAHIT contigs.
+#
+# Reports N50, largest contig, total assembled length, GC% and other
+# standard assembly metrics. Runs on the un-polished MEGAHIT output so
+# the metrics describe the assembler's behaviour directly; Pilon
+# improvements are a separate concern. Output is consumed by MultiQC.
+rule quast_megahit:
+    input:
+        contigs=rules.megahit.output.contigs,
+    output:
+        report_dir=directory(f"{RESULT_FOLDER}/{{sample}}/QUAST"),
+        report_tsv=f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv",
+    threads: 2
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/quast.log",
+    conda:
+        "../envs/quast.yaml"
+    shell:
+        """
+        quast.py \
+            --threads {threads} \
+            --output-dir {output.report_dir} \
+            --labels {wildcards.sample} \
+            {input.contigs} \
+            > {log} 2>&1
+        """
 
 
 # Rule: Polish contigs with Pilon

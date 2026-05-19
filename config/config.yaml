@@ -50,6 +50,15 @@ COVERAGE_WINDOW: 100
 # to skip. Default is "TRUE".
 MULTIQC: "TRUE"
 
+# Optional: exclude PCR duplicates from the host-removed reads that
+# feed MEGAHIT and the BWA-to-Kraken-hits coverage step. Off by default
+# to preserve parity with the original virusHanter outputs.
+DEDUPLICATE: "FALSE"
+
+# Optional: run QUAST on each sample's MEGAHIT contigs and feed the
+# report to MultiQC. Off by default.
+QUAST: "FALSE"
+
 # Optional: run geNomad as a second viral-contig classifier alongside
 # CheckV. Off by default for parity. Flip to "TRUE" and set
 # GENOMAD_DB to the populated `genomad_db/` directory produced by

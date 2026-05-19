@@ -152,6 +152,39 @@ csvcut -C html_report old/run_information_<batch>.csv | sort > old.csv
 diff old.csv new.csv   # should be empty
 ```
 
+## Additive 2026-05-19 viralrecon-gap additions
+
+Two further opt-in rules were added after a feature gap analysis
+against nf-core/viralrecon. Both are off by default so the parity
+invariant continues to hold for existing runs; flip the flag to opt
+in.
+
+- **`DEDUPLICATE: "TRUE"` flag**
+  (`rules/pre_processing.smk`). When set, `markdup_human` writes a
+  marked BAM and `remove_host` reads it with `samtools view -F 1024`
+  so PCR duplicates do not propagate into the host-removed FASTQs
+  that feed MEGAHIT and the BWA-to-Kraken-hits coverage step. With
+  the flag off (default), `remove_host` continues to consume the
+  un-marked `bwa_human` BAM and outputs are byte-identical to before.
+  When enabling on a production sample, re-run an existing sample
+  with the flag both off and on and compare the resulting Kraken /
+  Kaiju top-hit percentages and mosdepth mean coverages — the
+  magnitude of the shift is library-dependent and should be recorded
+  here for the panels that route through this option.
+- **`QUAST: "TRUE"` flag** (`rules/assembly.smk`). When set,
+  `quast_megahit` runs against each sample's raw MEGAHIT contigs and
+  writes `QUAST/report.tsv` per sample. The report directory is
+  picked up automatically by MultiQC and also depended on as an
+  explicit input to keep the dependency graph honest. With the flag
+  off (default), no QUAST process runs and there is no change to the
+  rest of the workflow.
+
+Both additions are pure additions to the workflow graph: the
+parity-locked columns of `run_information_<batch>.csv` are not
+touched in either case, and the per-sample HTML report is unchanged
+unless and until reportHanter is taught to surface QUAST metrics
+(separate follow-up).
+
 ## Expected divergences
 
 The following differences are intentional and should not be treated as

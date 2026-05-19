@@ -48,6 +48,11 @@ RUN_MULTIQC = config.get("MULTIQC", "TRUE") == "TRUE"
 # to opt in.
 RUN_GENOMAD_WF = config.get("GENOMAD", "FALSE") == "TRUE"
 
+# Optional QUAST assembly assessment. Default off so the parity
+# invariant holds; flip QUAST: "TRUE" to opt in. Output is also fed
+# into MultiQC when both are enabled.
+RUN_QUAST_WF = config.get("QUAST", "FALSE") == "TRUE"
+
 # Include rule files
 include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
@@ -82,6 +87,12 @@ rule all:
                 sample=SAMPLES,
             )
             if RUN_GENOMAD_WF
+            else []
+        ),
+        # Optional QUAST assembly assessment, gated by QUAST config flag.
+        (
+            expand(f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv", sample=SAMPLES)
+            if RUN_QUAST_WF
             else []
         ),
         clean_list,

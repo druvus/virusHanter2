@@ -261,6 +261,15 @@ rule multiqc:
         run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
         markdup=expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES),
         mosdepth=expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
+        # Optional: QUAST reports when the assembler-QC step is enabled.
+        # MultiQC scans the results folder regardless, but depending on
+        # the report.tsv keeps the dependency graph honest so MultiQC
+        # waits until QUAST has finished before scanning.
+        quast=(
+            expand(f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv", sample=SAMPLES)
+            if config.get("QUAST", "FALSE") == "TRUE"
+            else []
+        ),
     output:
         html=f"{RESULT_FOLDER}/multiqc_report.html",
         data=directory(f"{RESULT_FOLDER}/multiqc_data"),

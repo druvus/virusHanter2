@@ -96,6 +96,26 @@ properties:
       Window size in base pairs passed to `mosdepth --by`. Controls
       the resolution of the coverage trace rendered by reporthanter.
       Smaller values give a finer trace and a larger regions.bed.gz.
+  DEDUPLICATE:
+    type: string
+    enum: ["TRUE", "FALSE"]
+    default: "FALSE"
+    description: |
+      When "TRUE", PCR duplicates marked by samtools markdup on the
+      host alignment are excluded from the host-removed BAM that feeds
+      MEGAHIT and the BWA-to-Kraken-hits coverage step. Off by default
+      to preserve byte-identical parity with the original virusHanter
+      outputs; turn on for low-input clinical libraries where duplicate
+      inflation biases coverage interpretation.
+  QUAST:
+    type: string
+    enum: ["TRUE", "FALSE"]
+    default: "FALSE"
+    description: |
+      When "TRUE", QUAST runs on each sample's MEGAHIT contigs and the
+      report is included in the MultiQC aggregate. Off by default;
+      enables N50, largest contig, total assembled length and similar
+      assembly metrics for batch-level QC triage.
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.

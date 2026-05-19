@@ -34,6 +34,13 @@ PILON_MEM: "8G"
 
 # Additive QC additions from the 2026-05-17 Twist VRP audit.
 MULTIQC: "TRUE"
+# Opt-in dedup. Off by default to keep parity with the original
+# virusHanter outputs; turn on for low-input libraries where
+# PCR duplicates inflate apparent viral coverage.
+DEDUPLICATE: "FALSE"
+# Opt-in QUAST assembly assessment. Off by default; produces N50,
+# largest contig, total length and feeds the MultiQC aggregate.
+QUAST: "FALSE"
 # Optional second viral-contig classifier. Off until a geNomad DB is
 # materialised; see docs/REFERENCE_DBS.md for the download URL.
 GENOMAD: "FALSE"

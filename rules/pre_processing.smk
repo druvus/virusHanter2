@@ -16,6 +16,11 @@ HUMAN_INDEX = config["HUMAN_INDEX"]
 SECONDARY_HOST_INDEX = config.get("SECONDARY_HOST_INDEX", "")
 SECONDARY_HOST_NAME = config.get("SECONDARY_HOST_NAME", "")
 SECONDARY_HOST_OR_NOT = bool(SECONDARY_HOST_INDEX)
+# Off by default to preserve byte-identical parity with the original
+# virusHanter outputs. When TRUE, `remove_host` reads the markdup BAM
+# and excludes flag-1024 reads from the host-removed FASTQs that feed
+# MEGAHIT and the BWA-to-Kraken-hits coverage step.
+DEDUPLICATE = config.get("DEDUPLICATE", "FALSE") == "TRUE"
 
 # Rule: Quality control with fastp
 rule fastp:
@@ -69,20 +74,23 @@ rule bwa_human:
         bwa mem -t {threads} -k 26 {params.index} {input.r1} {input.r2} | samtools sort -o {output.mapped_bam} - > {log} 2>&1
         """
 
-# Rule: Mark PCR duplicates on the host-aligned BAM and emit a stats
-# summary. This is a reporting-only step — `remove_host` keeps reading
-# the un-marked bwa_human output, so flagstat counts and every
-# downstream rule are byte-identical to the pre-markdup run.
+# Rule: Mark PCR duplicates on the host-aligned BAM.
+#
+# The textual stats file is always emitted (consumed by MultiQC and
+# reporthanter). The markdup BAM is emitted as well so `remove_host`
+# can read it when `DEDUPLICATE: TRUE` is set in config. With
+# `DEDUPLICATE: FALSE` (the default), `remove_host` ignores this BAM
+# and continues to consume the un-marked bwa_human output — the
+# pipeline is then byte-identical to the pre-markdup behaviour.
 #
 # `samtools markdup` requires MC/MS tags added by `fixmate`, which in
 # turn needs a name-sorted BAM. `bwa_human` writes a coordinate-sorted
 # BAM, so the chain is: name-sort -> fixmate -> coord-sort -> markdup.
-# Everything is piped to avoid intermediate files; only the textual
-# stats file is kept.
 rule markdup_human:
     input:
         mapped_bam=rules.bwa_human.output.mapped_bam,
     output:
+        markdup_bam=f"{RESULT_FOLDER}/{{sample}}/bwa/{{sample}}_human_markdup.bam",
         stats=f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt",
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/markdup_human.log"
@@ -94,17 +102,29 @@ rule markdup_human:
         samtools sort -n -@ {threads} -O bam {input.mapped_bam} 2>> {log} \
           | samtools fixmate -m -@ {threads} -O bam - - 2>> {log} \
           | samtools sort -@ {threads} -O bam - 2>> {log} \
-          | samtools markdup -@ {threads} -s -f {output.stats} - /dev/null 2>> {log}
+          | samtools markdup -@ {threads} -s -f {output.stats} - {output.markdup_bam} 2>> {log}
         """
 
 
-# Rule: Remove reads mapped to human genome
+# Rule: Remove reads mapped to human genome.
+#
+# When `DEDUPLICATE: TRUE`, this rule reads the markdup BAM and
+# excludes flag-1024 reads so downstream assembly and coverage are
+# not inflated by PCR duplicates. The default (`DEDUPLICATE: FALSE`)
+# reads the un-marked bwa_human BAM, preserving byte-identical parity
+# with the original virusHanter pipeline.
 rule remove_host:
     input:
-        mapped_bam=rules.bwa_human.output.mapped_bam,
+        mapped_bam=(
+            rules.markdup_human.output.markdup_bam
+            if DEDUPLICATE
+            else rules.bwa_human.output.mapped_bam
+        ),
     output:
         unmapped_bam=f"{RESULT_FOLDER}/{{sample}}/bwa/{{sample}}_human_unmapped.bam",
         flagstat=f"{RESULT_FOLDER}/{{sample}}/logs/human_contamination_flagstat.txt",
+    params:
+        dup_filter="-F 1024" if DEDUPLICATE else "",
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/remove_host.log"
     conda:
@@ -112,7 +132,7 @@ rule remove_host:
     shell:
         """
         samtools flagstat {input.mapped_bam} > {output.flagstat}
-        samtools view -b -f 12 {input.mapped_bam} > {output.unmapped_bam} 2>> {log}
+        samtools view -b -f 12 {params.dup_filter} {input.mapped_bam} > {output.unmapped_bam} 2>> {log}
         """
 
 # Rule: Convert BAM to FASTQ after human host removal
