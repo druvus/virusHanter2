@@ -135,6 +135,7 @@ rule generate_report:
         kraken_report=rules.kraken.output.kraken_report,
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
         coverage_dir=rules.bam2plot.output.coverage_plots_dir,
+        mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
     output:
         report_html=f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html",
     conda:
@@ -159,6 +160,7 @@ rule generate_report:
             --fastp_json {input.fastp_json} \
             --flagstat_file {input.flagstat} \
             --coverage_folder {input.coverage_dir} \
+            --mosdepth_regions {input.mosdepth_regions} \
             --output {output.report_html} \
             --sample_name {wildcards.sample} \
             {params.secondary_args} \
