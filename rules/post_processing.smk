@@ -3,6 +3,8 @@
 # Coverage alignment, report generation (via the reporthanter CLI), run
 # aggregation, and optional cleanup.
 
+import re
+
 from scripts.functions import read_file_as_blob
 
 # Set variables
@@ -155,6 +157,12 @@ rule generate_report:
             if SECONDARY_HOST_OR_NOT
             else ""
         ),
+        # Strip the trailing "_R" that the paired-read wildcard scheme
+        # leaves behind (Illumina-style R1/R2 file pairs split into a
+        # sample name ending in "_R"). The wildcard itself must stay as
+        # is for filesystem paths; this affects only the display name
+        # shown in the report header.
+        display_name=lambda wildcards: re.sub(r"_R$", "", wildcards.sample),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
     shell:
@@ -168,7 +176,7 @@ rule generate_report:
             --coverage_folder {input.coverage_dir} \
             --mosdepth_regions {input.mosdepth_regions} \
             --output {output.report_html} \
-            --sample_name {wildcards.sample} \
+            --sample_name {params.display_name} \
             {params.secondary_args} \
             > {log} 2>&1
         """
