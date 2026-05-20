@@ -69,14 +69,18 @@ def main() -> None:
     args.host_fasta.parent.mkdir(parents=True, exist_ok=True)
     args.host_fasta.write_text(fasta_block("synthetic_host", get_host_reference()))
 
-    # Multi-record viral nucleotide FASTA. Each record header carries
-    # `|kraken:taxid|<id>` so kraken2-build picks the right taxid up.
+    # Multi-record viral nucleotide FASTA with clean headers. The
+    # kraken2-build step tags these with `|kraken:taxid|<id>` in its
+    # own copy (see rule `kraken_library` in build_fixtures.smk); we
+    # keep the canonical FASTA clean so BLAST and the virus parquet
+    # see record names like "alpha" that match Kraken2's species
+    # names ("synthetic virus alpha") via substring lookup downstream
+    # in `attribute_contigs`.
     viruses = get_virus_references()
     args.virus_fasta.parent.mkdir(parents=True, exist_ok=True)
     with args.virus_fasta.open("w") as fh:
         for name, info in viruses.items():
-            header = f"{name}|kraken:taxid|{info['taxid']}"
-            fh.write(fasta_block(header, info["sequence"]))
+            fh.write(fasta_block(name, info["sequence"]))
 
     if args.virus_protein_fasta is not None:
         # Kaiju ingests one protein record per virus with a sequential

@@ -167,10 +167,25 @@ rule kraken_library:
         virus=rules.write_references.output.virus,
     output:
         fna=f"{MINI}/kraken/library/virus.fna",
-    shell:
-        # write_references.py already tags each record with
-        # `|kraken:taxid|<id>` so a straight copy is enough.
-        "mkdir -p $(dirname {output.fna}) && cp {input.virus} {output.fna}"
+    run:
+        # write_references.py emits clean headers (`>alpha`, `>beta`,
+        # ...). Add the `|kraken:taxid|<id>` suffix only in the
+        # kraken-build copy so kraken2-build picks the right taxid
+        # up while the canonical FASTA (consumed by BLAST + parquet)
+        # stays clean.
+        os.makedirs(os.path.dirname(output.fna), exist_ok=True)
+        with open(input.virus) as src, open(output.fna, "w") as dst:
+            for line in src:
+                if line.startswith(">"):
+                    name = line[1:].strip().split()[0]
+                    tid = SMOKE_VIRUSES.get(name)
+                    if tid is None:
+                        raise SystemExit(
+                            f"Unknown virus record {name!r} in {input.virus}"
+                        )
+                    dst.write(f">{name}|kraken:taxid|{tid}\n")
+                else:
+                    dst.write(line)
 
 
 rule kraken_build:
