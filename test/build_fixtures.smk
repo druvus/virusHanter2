@@ -10,8 +10,11 @@
 #             --directory .
 #
 # Outputs:
-#   test/test_R{1,2}.fastq.gz              (paired reads, gzipped to match
-#                                           production .fastq.gz inputs)
+#   test/{sample1,sample2,sample3}_R{1,2}.fastq.gz
+#                                          (paired reads, gzipped to match
+#                                           production .fastq.gz inputs;
+#                                           three samples so the smoke
+#                                           exercises multi-sample paths)
 #   test/mini_db/host.fasta                (host reference)
 #   test/mini_db/virus.fasta               (viral reference, nucleotide)
 #   test/mini_db/virus_aa.fasta            (viral reference, protein)
@@ -27,11 +30,34 @@ import os
 MINI = "test/mini_db"
 SCRIPTS = "test/scripts"
 
+# Three synthetic samples, one per synthetic virus (alpha / beta /
+# gamma — defined in test/scripts/synthesize_fastq.py). Distinct seeds
+# and read counts give the per-virus aggregation something to vary on,
+# and the per-sample virus assignment lets the smoke confirm that
+# Kraken2 / Kaiju / BLASTN actually call the right taxid per sample
+# rather than collapsing everything onto a single reference. The
+# trailing "_R" matches the Illumina R1/R2 split convention that
+# virusHanter2's wildcard scheme leaves behind as a display-name
+# suffix.
+SMOKE_SAMPLES = {
+    "sample1_R": {"virus": "alpha", "seed": 101, "n_virus": 800, "n_host": 60, "n_random": 50},
+    "sample2_R": {"virus": "beta",  "seed": 202, "n_virus": 600, "n_host": 80, "n_random": 50},
+    "sample3_R": {"virus": "gamma", "seed": 303, "n_virus": 400, "n_host": 40, "n_random": 60},
+}
+
+# Stable mapping from virus name to NCBI-style taxid, mirroring
+# VIRUS_REFS in synthesize_fastq.py. Used to build the Kraken taxonomy
+# and tag references; keep in sync with the python module.
+SMOKE_VIRUSES = {
+    "alpha": 100001,
+    "beta": 100002,
+    "gamma": 100003,
+}
+
 
 rule all:
     input:
-        "test/test_R1.fastq.gz",
-        "test/test_R2.fastq.gz",
+        expand("test/{sample}{r}.fastq.gz", sample=SMOKE_SAMPLES, r=["1", "2"]),
         f"{MINI}/human/human.bwt",
         f"{MINI}/kraken/hash.k2d",
         f"{MINI}/kaiju/kaiju_db.fmi",
@@ -45,11 +71,25 @@ rule all:
 # Pipeline-side helpers (Python only — no bioinformatics tools required).
 rule synthesize_reads:
     output:
-        r1="test/test_R1.fastq.gz",
-        r2="test/test_R2.fastq.gz",
+        r1="test/{sample}1.fastq.gz",
+        r2="test/{sample}2.fastq.gz",
+    params:
+        virus=lambda wildcards: SMOKE_SAMPLES[wildcards.sample]["virus"],
+        seed=lambda wildcards: SMOKE_SAMPLES[wildcards.sample]["seed"],
+        n_virus=lambda wildcards: SMOKE_SAMPLES[wildcards.sample]["n_virus"],
+        n_host=lambda wildcards: SMOKE_SAMPLES[wildcards.sample]["n_host"],
+        n_random=lambda wildcards: SMOKE_SAMPLES[wildcards.sample]["n_random"],
+    wildcard_constraints:
+        sample="|".join(SMOKE_SAMPLES.keys()),
     shell:
         "python {SCRIPTS}/synthesize_fastq.py "
-        "--out-r1 {output.r1} --out-r2 {output.r2}"
+        "--out-r1 {output.r1} --out-r2 {output.r2} "
+        "--sample {wildcards.sample} "
+        "--virus {params.virus} "
+        "--seed {params.seed} "
+        "--n-virus {params.n_virus} "
+        "--n-host {params.n_host} "
+        "--n-random {params.n_random}"
 
 
 rule write_references:
@@ -88,27 +128,38 @@ rule bwa_host_index:
         "bwa index -p {params.prefix} {input.host}"
 
 
-# Kraken2 mini-DB. We hand-write a 3-line nodes.dmp + names.dmp and tag the
-# virus reference with the kraken-style accession comment so kraken2-build
-# can pull a taxid out of it.
+# Kraken2 mini-DB. We hand-write a small nodes.dmp + names.dmp covering
+# root, the Viruses superkingdom and the three synthetic species. The
+# viral FASTA emitted by write_references.py already carries
+# `|kraken:taxid|<id>` headers, so kraken2-build picks the taxids up
+# directly without a sed rewrite.
 rule kraken_taxonomy:
     output:
         nodes=f"{MINI}/kraken/taxonomy/nodes.dmp",
         names=f"{MINI}/kraken/taxonomy/names.dmp",
     run:
         os.makedirs(os.path.dirname(output.nodes), exist_ok=True)
+        # NCBI dump format: tab-pipe-tab-delimited columns; the empty
+        # trailing columns are required by kraken2-build's parser.
+        node_lines = [
+            "1\t|\t1\t|\tno rank\t|\t\t|\t8\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|",
+            "10239\t|\t1\t|\tsuperkingdom\t|\t\t|\t9\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|",
+        ]
+        name_lines = [
+            "1\t|\troot\t|\t\t|\tscientific name\t|",
+            "10239\t|\tViruses\t|\t\t|\tscientific name\t|",
+        ]
+        for vname, tid in SMOKE_VIRUSES.items():
+            node_lines.append(
+                f"{tid}\t|\t10239\t|\tspecies\t|\t\t|\t9\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|"
+            )
+            name_lines.append(
+                f"{tid}\t|\tsynthetic virus {vname}\t|\t\t|\tscientific name\t|"
+            )
         with open(output.nodes, "w") as f:
-            f.write(
-                "1\t|\t1\t|\tno rank\t|\t\t|\t8\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|\n"
-                "10239\t|\t1\t|\tsuperkingdom\t|\t\t|\t9\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|\n"
-                "100001\t|\t10239\t|\tspecies\t|\t\t|\t9\t|\t0\t|\t1\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|\n"
-            )
+            f.write("\n".join(node_lines) + "\n")
         with open(output.names, "w") as f:
-            f.write(
-                "1\t|\troot\t|\t\t|\tscientific name\t|\n"
-                "10239\t|\tViruses\t|\t\t|\tscientific name\t|\n"
-                "100001\t|\tsynthetic virus\t|\t\t|\tscientific name\t|\n"
-            )
+            f.write("\n".join(name_lines) + "\n")
 
 
 rule kraken_library:
@@ -117,9 +168,9 @@ rule kraken_library:
     output:
         fna=f"{MINI}/kraken/library/virus.fna",
     shell:
-        r"""mkdir -p $(dirname {output.fna})
-        sed 's/^>synthetic_virus/>synthetic_virus|kraken:taxid|100001/' \
-            {input.virus} > {output.fna}"""
+        # write_references.py already tags each record with
+        # `|kraken:taxid|<id>` so a straight copy is enough.
+        "mkdir -p $(dirname {output.fna}) && cp {input.virus} {output.fna}"
 
 
 rule kraken_build:
@@ -158,7 +209,9 @@ rule kaiju_protein_fasta:
     output:
         faa=f"{MINI}/kaiju/virus_aa.faa",
     shell:
-        r"""sed 's/^>synthetic_virus_aa/>P00001_100001/' {input.aa} > {output.faa}"""
+        # write_references.py emits one `>P0000N_<taxid>` record per
+        # virus already; just copy it into the kaiju build dir.
+        "mkdir -p $(dirname {output.faa}) && cp {input.aa} {output.faa}"
 
 
 rule kaiju_build:

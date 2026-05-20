@@ -65,15 +65,22 @@ run_full() {
         checkv_ready=1
     fi
 
+    # Samples are derived from the synthetic fixtures in test/.
+    # build_fixtures.smk writes three pairs (sample1_R, sample2_R,
+    # sample3_R); the smoke checks the per-sample outputs for each.
+    local samples=("sample1_R" "sample2_R" "sample3_R")
+    local sample_dir="test/results/test"
+
     if [[ "$checkv_ready" == "1" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"
         snakemake --sdm conda --cores 2 --configfile "$CONFIG"
-        local sample_dir="test/results/test"
-        local html="$sample_dir/test_R/REPORT/test_R.html"
         local run_csv="$sample_dir/run_information_test.csv"
-        [[ -s "$html"     ]] || { echo "[smoke] FAIL: missing $html";     exit 1; }
-        [[ -s "$run_csv"  ]] || { echo "[smoke] FAIL: missing $run_csv";  exit 1; }
-        echo "[smoke] OK: $html, $run_csv"
+        [[ -s "$run_csv" ]] || { echo "[smoke] FAIL: missing $run_csv"; exit 1; }
+        for s in "${samples[@]}"; do
+            local html="$sample_dir/$s/REPORT/$s.html"
+            [[ -s "$html" ]] || { echo "[smoke] FAIL: missing $html"; exit 1; }
+        done
+        echo "[smoke] OK: $run_csv plus REPORT/<sample>.html for ${samples[*]}"
     else
         echo "[smoke] CheckV DB is stubbed; running everything that doesn't depend on CheckV"
         # Terminal rules whose combined dependencies cover the assembly
@@ -82,18 +89,19 @@ run_full() {
         # aggregate_run_information stay out of this set.
         snakemake --sdm conda --cores 2 --configfile "$CONFIG" \
             --until blastn mosdepth_kraken_hits kaiju_to_table
-        local sd="test/results/test/test_R"
-        local expected=(
-            "$sd/BLASTN/test_R.contigs.blastn.csv"
-            "$sd/KAIJU/test_R.kaiju.table.tsv"
-            "$sd/KRAKEN/test_R.kraken.csv"
-            "$sd/MOSDEPTH/test_R.regions.bed.gz"
-        )
-        for f in "${expected[@]}"; do
-            [[ -e "$f" ]] || { echo "[smoke] FAIL: missing $f"; exit 1; }
+        for s in "${samples[@]}"; do
+            local sd="$sample_dir/$s"
+            local expected=(
+                "$sd/BLASTN/$s.contigs.blastn.csv"
+                "$sd/KAIJU/$s.kaiju.table.tsv"
+                "$sd/KRAKEN/$s.kraken.csv"
+                "$sd/MOSDEPTH/$s.regions.bed.gz"
+            )
+            for f in "${expected[@]}"; do
+                [[ -e "$f" ]] || { echo "[smoke] FAIL: missing $f"; exit 1; }
+            done
         done
-        echo "[smoke] OK:"
-        for f in "${expected[@]}"; do echo "  - $f"; done
+        echo "[smoke] OK: per-sample BLASTN/KAIJU/KRAKEN/MOSDEPTH for ${samples[*]}"
         echo "[smoke] (HTML report stage skipped; provide a real CheckV DB to enable it.)"
     fi
 }

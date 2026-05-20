@@ -13,12 +13,13 @@ Runs `snakemake --lint` and `snakemake -n --sdm conda` against
 `test/mini_db/` has to exist. This is what CI runs on every commit and is
 the cheapest regression check for DAG construction and the rule imports.
 
-The committed `test_R[12].fastq.gz` files are 0-byte placeholders. A
-fresh checkout therefore dry-runs against a degenerate one-sample plan
-(file paths exist, content does not), which is sufficient for the DAG
-construction check. Run `./test/build_fixtures.sh` (or
-`./test/run_smoke.sh --build`) to overwrite them with synthesised
-gzipped reads alongside the mock databases.
+The fixture FASTQs (`sample1_R{1,2}.fastq.gz`, `sample2_R{1,2}.fastq.gz`,
+`sample3_R{1,2}.fastq.gz`) are not committed; a fresh checkout has none
+of them on disk. Run `./test/build_fixtures.sh` (or
+`./test/run_smoke.sh --build`) to synthesise them alongside the mock
+databases. Each sample uses a distinct random seed and read mix so the
+smoke exercises multi-sample paths (per-sample reports plus run-level
+aggregation).
 
 ## Partial smoke (synthetic mini-DBs, no CheckV)
 

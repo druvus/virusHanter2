@@ -2,13 +2,38 @@
 Emit FASTA files for the synthetic host and viral references shared by the
 fixture builders. Lets shell tools (bwa index, makeblastdb, kraken2-build,
 kaiju-mkbwt) consume the same sequences the FASTQ synthesizer used.
+
+There is one host record and three viral records (alpha / beta / gamma).
+The viral nucleotide FASTA carries Kraken-style taxid tags so
+``kraken2-build --add-to-library`` can pick them up; the protein FASTA is
+formatted for ``kaiju-mkbwt`` (header ``>P0000N_<taxid>``).
 """
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from synthesize_fastq import get_host_reference, get_virus_reference
+from synthesize_fastq import get_host_reference, get_virus_references
+
+
+CODON_TABLE = {
+    "TTT": "F", "TTC": "F", "TTA": "L", "TTG": "L",
+    "CTT": "L", "CTC": "L", "CTA": "L", "CTG": "L",
+    "ATT": "I", "ATC": "I", "ATA": "I", "ATG": "M",
+    "GTT": "V", "GTC": "V", "GTA": "V", "GTG": "V",
+    "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S",
+    "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
+    "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
+    "GCT": "A", "GCC": "A", "GCA": "A", "GCG": "A",
+    "TAT": "Y", "TAC": "Y", "TAA": "*", "TAG": "*",
+    "CAT": "H", "CAC": "H", "CAA": "Q", "CAG": "Q",
+    "AAT": "N", "AAC": "N", "AAA": "K", "AAG": "K",
+    "GAT": "D", "GAC": "D", "GAA": "E", "GAG": "E",
+    "TGT": "C", "TGC": "C", "TGA": "*", "TGG": "W",
+    "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R",
+    "AGT": "S", "AGC": "S", "AGA": "R", "AGG": "R",
+    "GGT": "G", "GGC": "G", "GGA": "G", "GGG": "G",
+}
 
 
 def fasta_block(name: str, seq: str, line_width: int = 70) -> str:
@@ -16,6 +41,16 @@ def fasta_block(name: str, seq: str, line_width: int = 70) -> str:
     for i in range(0, len(seq), line_width):
         lines.append(seq[i : i + line_width])
     return "\n".join(lines) + "\n"
+
+
+def translate_frame0(nt: str) -> str:
+    """Frame-0 translation with stop codons replaced by 'X' so the result
+    is a single contiguous protein string suitable for kaiju-mkbwt.
+    """
+    protein = "".join(
+        CODON_TABLE.get(nt[i : i + 3], "X") for i in range(0, len(nt) - 2, 3)
+    )
+    return protein.replace("*", "X")
 
 
 def main() -> None:
@@ -30,42 +65,28 @@ def main() -> None:
     )
     args = p.parse_args()
 
+    # Host FASTA.
     args.host_fasta.parent.mkdir(parents=True, exist_ok=True)
     args.host_fasta.write_text(fasta_block("synthetic_host", get_host_reference()))
 
+    # Multi-record viral nucleotide FASTA. Each record header carries
+    # `|kraken:taxid|<id>` so kraken2-build picks the right taxid up.
+    viruses = get_virus_references()
     args.virus_fasta.parent.mkdir(parents=True, exist_ok=True)
-    args.virus_fasta.write_text(fasta_block("synthetic_virus", get_virus_reference()))
+    with args.virus_fasta.open("w") as fh:
+        for name, info in viruses.items():
+            header = f"{name}|kraken:taxid|{info['taxid']}"
+            fh.write(fasta_block(header, info["sequence"]))
 
     if args.virus_protein_fasta is not None:
-        # Crude six-frame-ish protein for Kaiju. Take the nucleotide sequence
-        # and translate frame 0; if any stop codons appear, just emit ASCII
-        # padding so kaiju-mkbwt has something to ingest.
-        nt = get_virus_reference()
-        table = {
-            "TTT": "F", "TTC": "F", "TTA": "L", "TTG": "L",
-            "CTT": "L", "CTC": "L", "CTA": "L", "CTG": "L",
-            "ATT": "I", "ATC": "I", "ATA": "I", "ATG": "M",
-            "GTT": "V", "GTC": "V", "GTA": "V", "GTG": "V",
-            "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S",
-            "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
-            "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
-            "GCT": "A", "GCC": "A", "GCA": "A", "GCG": "A",
-            "TAT": "Y", "TAC": "Y", "TAA": "*", "TAG": "*",
-            "CAT": "H", "CAC": "H", "CAA": "Q", "CAG": "Q",
-            "AAT": "N", "AAC": "N", "AAA": "K", "AAG": "K",
-            "GAT": "D", "GAC": "D", "GAA": "E", "GAG": "E",
-            "TGT": "C", "TGC": "C", "TGA": "*", "TGG": "W",
-            "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R",
-            "AGT": "S", "AGC": "S", "AGA": "R", "AGG": "R",
-            "GGT": "G", "GGC": "G", "GGA": "G", "GGG": "G",
-        }
-        protein = "".join(
-            table.get(nt[i : i + 3], "X") for i in range(0, len(nt) - 2, 3)
-        ).replace("*", "X")
+        # Kaiju ingests one protein record per virus with a sequential
+        # `>P0000N_<taxid>` header. Frame-0 translation; stops -> X so
+        # the protein is one contiguous string.
         args.virus_protein_fasta.parent.mkdir(parents=True, exist_ok=True)
-        args.virus_protein_fasta.write_text(
-            fasta_block("synthetic_virus_aa", protein)
-        )
+        with args.virus_protein_fasta.open("w") as fh:
+            for idx, (name, info) in enumerate(viruses.items(), start=1):
+                header = f"P{idx:05d}_{info['taxid']}"
+                fh.write(fasta_block(header, translate_frame0(info["sequence"])))
 
 
 if __name__ == "__main__":
