@@ -123,7 +123,17 @@ def fastx_file_to_df(fastx_file: str) -> pd.DataFrame:
 
 def wrangle_kraken(kraken_file: str) -> pd.DataFrame:
     """Parse a Kraken2 report TSV into a DataFrame with an explicit `domain`
-    column carried down from the nearest D/U/R parent row.
+    column carried down from the nearest D/U/R/R1 parent row.
+
+    Kraken2's pluspf database tags 'Viruses' as ``tax_lvl='D'``, so the
+    original D/U/R anchor set was sufficient. The smaller viral-only
+    databases (e.g. ``k2_viral_*``) place 'Viruses' at ``tax_lvl='R1'``
+    because there is no other superkingdom alongside it to require a
+    domain level. Including ``R1`` as an anchor makes the ``domain``
+    column carry "Viruses" in both DB shapes. On pluspf the only extra
+    R1 row is "cellular organisms", which is immediately overridden by
+    the next D row (Bacteria), so the column values for every
+    D-and-below row stay identical and the parity invariant holds.
     """
     kraken = (
         pd.read_csv(
@@ -135,7 +145,7 @@ def wrangle_kraken(kraken_file: str) -> pd.DataFrame:
         .assign(name=lambda x: x.name.str.strip())
         .assign(
             domain=lambda x: np.select(
-                [x.tax_lvl.isin(["D", "U", "R"])],
+                [x.tax_lvl.isin(["D", "U", "R", "R1"])],
                 [x.name],
                 default=pd.NA,
             )
