@@ -60,13 +60,19 @@ rule megahit:
         # configurable fraction so it fits on small hosts; on a Linux box
         # with abundant RAM this is still a sensible cap.
         mem_fraction = float(config.get("MEGAHIT_MEM_FRACTION", 0.5))
-        # Apple Silicon bioconda osx-arm64 megahit has two reproducible
+        # Apple Silicon bioconda osx-arm64 megahit has three reproducible
         # quirks: (1) `megahit_core_popcnt` segfaults on `count -k 21`
         # regardless of memory; (2) `megahit_core_no_hw_accel` segfaults
-        # at `-t > 2`. Force the no_hw_accel variant and cap threads at
-        # 2 on Darwin/arm64. Both flags are no-ops or harmless on Linux.
+        # at `-t > 2`; (3) `megahit_core_no_hw_accel count -k 21` also
+        # SIGSEGVs on small inputs (the smoke fixture, e.g.) — raising
+        # the minimum k past 21 avoids the buggy path. Force the
+        # no_hw_accel variant, cap threads at 2, and start at k=27 on
+        # Darwin/arm64. All three flags are no-ops or harmless on Linux,
+        # but k=27 is a small assembly-quality concession so it is gated
+        # on the platform check rather than applied globally.
         is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
         no_hw_accel = "--no-hw-accel " if is_apple_silicon else ""
+        kmin_flag = "--k-min 27 " if is_apple_silicon else ""
         mh_threads = min(threads, 2) if is_apple_silicon else threads
         try:
             shell(
@@ -77,6 +83,7 @@ rule megahit:
                 f"-t {mh_threads} "
                 f"-m {mem_fraction} "
                 f"{no_hw_accel}"
+                f"{kmin_flag}"
                 "2> {log}"
             )
         except subprocess.CalledProcessError:

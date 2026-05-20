@@ -188,6 +188,30 @@ touched in either case, and the per-sample HTML report is unchanged
 unless and until reportHanter is taught to surface QUAST metrics
 (separate follow-up).
 
+## 2026-05-20: Apple Silicon MEGAHIT k=21 SIGSEGV — `--k-min 27`
+
+The smoke pipeline's apparent "CheckV failure on Apple Silicon" was
+re-diagnosed. `megahit_core_no_hw_accel count -k 21` SIGSEGVs on
+small inputs on osx-arm64 (the same kernel-of-bug as the `_popcnt`
+variant). The MEGAHIT rule's safety net then wrote `DUMMY_CONTIG`,
+which Pilon polished into a 200 bp repeat. Prodigal-gv (called by
+CheckV) found no ORFs in the dummy and emitted an empty
+`proteins.faa`; CheckV's hmmsearch then errored on the empty input
+with "Sequence file is empty or misformatted" for all 80 tasks,
+which the earlier session mistook for an `mp.Pool` internal failure
+(observations #1987, #1990, #1992).
+
+The fix in `rules/assembly.smk` adds `--k-min 27` on Apple Silicon,
+alongside the existing `--no-hw-accel` flag and the 2-thread cap.
+That avoids the buggy k=21 path entirely. Verified: MEGAHIT runs
+the smoke input to a real 4906 bp contig in ~0.2 s; CheckV then
+produces a real `contamination.tsv` in ~7 s.
+
+Production Linux runs are unaffected — both `_popcnt` and
+`_no_hw_accel` binaries handle k=21 correctly there. The `--k-min 27`
+flag is gated on the platform check, so it imposes no
+assembly-quality concession on Linux.
+
 ## 2026-05-19: `bam2plot` retired
 
 The `bam2plot` rule that produced `COVERAGE_PLOTS/*.svg` and the
