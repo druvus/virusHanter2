@@ -18,6 +18,32 @@ production config at
 | `all_viruses.parquet` | `INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet` | `bwa_align_to_kraken_hits`, `per_virus_metrics` | rebuild after FASTA refresh |
 | geNomad DB (optional) | `GENOMAD_DB/genomad_db/` | `genomad` (only when `GENOMAD: "TRUE"`) | when geNomad releases a new DB |
 
+## CheckV on a Mac-mounted external volume
+
+If the CheckV DB is hosted on an external drive that has ever been
+written to by macOS Finder (HFS+/APFS volumes formatted by macOS, or
+network shares browsed from macOS), `hmm_db/checkv_hmms/` will end up
+with AppleDouble companion files (`._1.hmm`, `._2.hmm`, ...). These
+are tiny resource-fork metadata stubs that macOS creates alongside
+real files on volumes that lack native extended-attribute support.
+
+CheckV's hmmsearch driver lists the HMM directory and feeds every
+entry to its multiprocessing pool. The ghost files are not valid
+HMMs, so hmmsearch errors on each one with
+`File existence/permissions problem in trying to open HMM file ...`,
+and CheckV reports a generic
+`Error: 80 hmmsearch tasks failed. Program should be rerun.` even
+when every real HMM ran cleanly.
+
+Strip them once after each refresh:
+
+```
+find /path/to/checkv-db-v1.5 -name '._*' -delete
+```
+
+For a permanent fix, host the CheckV DB on an APFS-local volume so
+Finder never creates the shadows in the first place.
+
 ## Rebuilding `all_viruses.parquet`
 
 The parquet is keyed by `(name, sequence, tax_id)` and is consumed by

@@ -85,8 +85,22 @@ unchanged; trailing additive columns are fine.
 
 `test/run_smoke.sh` runs lint + DAG dry-run by default; `--full`
 builds tiny fixtures under `test/mini_db/` and runs the pipeline
-through `generate_report` if a CheckV database is present. See
-[`test/README.md`](test/README.md). Apple Silicon: CheckV's
-`mp.Pool`/`hmmsearch` failure is a known limitation; the smoke
-degrades to `--until blastn mosdepth_kraken_hits kaiju_to_table`
-automatically when the CheckV DB is stubbed.
+through `generate_report` if a CheckV database is present. The
+fixture has three samples (`sample1_R`, `sample2_R`, `sample3_R`),
+each carrying a distinct synthetic virus (`alpha` / `beta` /
+`gamma`, taxids 100001-100003), so the smoke exercises multi-sample
+paths and the per-virus attribution. See
+[`test/README.md`](test/README.md) for the details.
+
+Apple Silicon caveats:
+
+- MEGAHIT's `_no_hw_accel count -k 21` SIGSEGVs on small inputs;
+  `rules/assembly.smk` already passes `--k-min 27` on
+  `Darwin/arm64` to dodge the buggy path.
+- A CheckV DB sourced from an external Mac volume can carry
+  AppleDouble `._*.hmm` metadata files that CheckV mis-reads as
+  HMMs ("80 hmmsearch tasks failed"). Strip them with
+  `find /path/to/checkv-db-vX -name '._*' -delete` once.
+
+When the CheckV DB is stubbed, the smoke degrades automatically to
+`--until blastn mosdepth_kraken_hits kaiju_to_table`.
