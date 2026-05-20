@@ -27,6 +27,7 @@ rule bwa_align_to_kraken_hits:
         r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
     output:
         virus_fasta=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_viruses.fasta",
+        virus_names=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_virus_names.tsv",
         bam=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/{{sample}}_kraken.bam",
     params:
         virus_db=VIRUS_PARQUET,
@@ -43,21 +44,31 @@ rule bwa_align_to_kraken_hits:
         # Read top Kraken2 viral taxa: select the 20 with the highest
         # percent classified, matching the original virusHanter ordering.
         kraken_df = pd.read_csv(input.kraken_csv)
-        top_tax_ids = (
+        top_viral = (
             kraken_df.loc[kraken_df.domain == "Viruses"]
             .sort_values("percent", ascending=False)
-            .head(20)["taxonomy_id"]
-            .tolist()
+            .head(20)
         )
+        top_tax_ids = top_viral["taxonomy_id"].tolist()
+        tax_to_name = dict(zip(top_viral["taxonomy_id"], top_viral["name"]))
 
         # Load viral sequences from the Parquet database
         virus_db_df = pd.read_parquet(params.virus_db)
         selected_viruses = virus_db_df[virus_db_df["tax_id"].isin(top_tax_ids)]
 
-        # Write selected viral sequences to FASTA file
-        with open(output.virus_fasta, "w") as f:
+        # Write selected viral sequences to FASTA file.
+        # Alongside, emit a chrom -> (tax_id, species_name) sidecar so
+        # reporthanter can label the coverage tabs with the friendly
+        # virus name instead of just the bare accession that bwa keeps
+        # as the @SQ id.
+        with open(output.virus_fasta, "w") as f, open(output.virus_names, "w") as nf:
+            nf.write("chrom\ttax_id\tname\n")
             for row in selected_viruses.itertuples():
+                accession = row.name.strip().split()[0]
+                tid = int(row.tax_id)
+                species = tax_to_name.get(tid, "")
                 f.write(f">{row.name.strip()}\n{row.sequence}\n")
+                nf.write(f"{accession}\t{tid}\t{species}\n")
 
         # Create BWA index
         index_prefix = params.index_prefix
@@ -117,6 +128,7 @@ rule generate_report:
         kraken_report=rules.kraken.output.kraken_report,
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
         mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
+        virus_names=rules.bwa_align_to_kraken_hits.output.virus_names,
         # When QUAST is enabled, surface its report inside the HTML
         # report as an Alignment Stats sub-tab.
         **(
@@ -161,6 +173,7 @@ rule generate_report:
             --fastp_json {input.fastp_json} \
             --flagstat_file {input.flagstat} \
             --mosdepth_regions {input.mosdepth_regions} \
+            --virus_names {input.virus_names} \
             {params.quast_args} \
             --output {output.report_html} \
             --sample_name {params.display_name} \
