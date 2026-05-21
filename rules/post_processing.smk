@@ -115,12 +115,21 @@ rule mosdepth_kraken_hits:
 
 
 # Rule: Generate interactive report via the reporthanter CLI
+#
+# Consumes the per-(sample, assembler) merged CSVs and any optional
+# per-assembler QUAST / geNomad outputs and hands them to the
+# reporthanter CLI. The CLI accepts repeated --blastn_file,
+# --quast_report and --genomad_summary flags so the report carries an
+# `assembler` column on the contig table.
 rule generate_report:
     input:
         flagstat=rules.remove_host.output.flagstat,
         secondary_flagstat=rules.remove_secondary_host.output.flagstat,
         fastp_json=rules.fastp.output.json_report,
-        blastn_csv=rules.merge_checkv_blastn.output.merged_csv,
+        blastn_csvs=expand(
+            f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/CHECKV/{{{{sample}}}}.merged.csv",
+            assembler=ASSEMBLERS,
+        ),
         # reporthanter's KrakenProcessor reads the raw Kraken2 report
         # (TSV, 6 columns, no header) and wrangles internally. The
         # pipeline-side wrangle_kraken CSV is used by
@@ -129,17 +138,27 @@ rule generate_report:
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
         mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
         virus_names=rules.bwa_align_to_kraken_hits.output.virus_names,
-        # When QUAST is enabled, surface its report inside the HTML
-        # report as an Alignment Stats sub-tab.
+        # When QUAST is enabled, surface every per-assembler report
+        # inside the HTML as an Alignment Stats sub-tab.
         **(
-            {"quast_report": rules.quast_megahit.output.report_tsv}
+            {
+                "quast_reports": expand(
+                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/QUAST/report.tsv",
+                    assembler=ASSEMBLERS,
+                )
+            }
             if config.get("QUAST", "FALSE") == "TRUE"
             else {}
         ),
-        # When geNomad is enabled, surface its per-sample virus
+        # When geNomad is enabled, surface every per-assembler virus
         # summary as a Classification of Contigs sub-tab.
         **(
-            {"genomad_summary": rules.genomad.output.summary}
+            {
+                "genomad_summaries": expand(
+                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_summary/{{{{sample}}}}_virus_summary.tsv",
+                    assembler=ASSEMBLERS,
+                )
+            }
             if config.get("GENOMAD", "FALSE") == "TRUE"
             else {}
         ),
@@ -162,26 +181,27 @@ rule generate_report:
         # is for filesystem paths; this affects only the display name
         # shown in the report header.
         display_name=lambda wildcards: re.sub(r"_R$", "", wildcards.sample),
-        quast_args=(
-            lambda wildcards, input: (
-                f"--quast_report {input.quast_report}"
-                if hasattr(input, "quast_report")
-                else ""
-            )
+        blastn_args=lambda wildcards, input: " ".join(
+            f"--blastn_file {p}" for p in input.blastn_csvs
         ),
-        genomad_args=(
-            lambda wildcards, input: (
-                f"--genomad_summary {input.genomad_summary}"
-                if hasattr(input, "genomad_summary")
-                else ""
+        quast_args=lambda wildcards, input: (
+            " ".join(f"--quast_report {p}" for p in input.quast_reports)
+            if hasattr(input, "quast_reports")
+            else ""
+        ),
+        genomad_args=lambda wildcards, input: (
+            " ".join(
+                f"--genomad_summary {p}" for p in input.genomad_summaries
             )
+            if hasattr(input, "genomad_summaries")
+            else ""
         ),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
     shell:
         """
         reporthanter \
-            --blastn_file {input.blastn_csv} \
+            {params.blastn_args} \
             --kraken_file {input.kraken_report} \
             --kaiju_table {input.kaiju_table} \
             --fastp_json {input.fastp_json} \
@@ -207,17 +227,24 @@ rule per_virus_metrics:
     input:
         kraken_csv=rules.wrangle_kraken.output.kraken_csv,
         kaiju_tsv=rules.kaiju_to_table.output.kaiju_table,
-        blastn_csv=rules.merge_checkv_blastn.output.merged_csv,
+        blastn_csvs=expand(
+            f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/CHECKV/{{{{sample}}}}.merged.csv",
+            assembler=ASSEMBLERS,
+        ),
         mosdepth_summary=rules.mosdepth_kraken_hits.output.summary,
         mosdepth_thresholds=rules.mosdepth_kraken_hits.output.thresholds,
         fastp_json=rules.fastp.output.json_report,
         flagstat=rules.remove_host.output.flagstat,
         virus_parquet=VIRUS_PARQUET,
-        # When geNomad is enabled, take its per-sample summary as an
-        # extra input. The flag is read from `config` so the input list
-        # is evaluated at rule-build time, not via a `lambda`.
+        # When geNomad is enabled, take every per-assembler summary as
+        # an extra input. Evaluated at rule-build time.
         **(
-            {"genomad_summary": rules.genomad.output.summary}
+            {
+                "genomad_summaries": expand(
+                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_summary/{{{{sample}}}}_virus_summary.tsv",
+                    assembler=ASSEMBLERS,
+                )
+            }
             if config.get("GENOMAD", "FALSE") == "TRUE"
             else {}
         ),
@@ -226,12 +253,15 @@ rule per_virus_metrics:
     params:
         run_name=Path(config["SAMPLES"]).name,
         top_n=NUMBER_OF_PLOTS,
-        genomad_args=(
-            lambda wildcards, input: (
-                f"--genomad-summary {input.genomad_summary}"
-                if hasattr(input, "genomad_summary")
-                else ""
+        blastn_args=lambda wildcards, input: " ".join(
+            f"--blastn-csv {p}" for p in input.blastn_csvs
+        ),
+        genomad_args=lambda wildcards, input: (
+            " ".join(
+                f"--genomad-summary {p}" for p in input.genomad_summaries
             )
+            if hasattr(input, "genomad_summaries")
+            else ""
         ),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/per_virus_metrics.log"
@@ -244,7 +274,7 @@ rule per_virus_metrics:
             --run-name {params.run_name} \
             --kraken-csv {input.kraken_csv} \
             --kaiju-tsv {input.kaiju_tsv} \
-            --blastn-csv {input.blastn_csv} \
+            {params.blastn_args} \
             --mosdepth-summary {input.mosdepth_summary} \
             --mosdepth-thresholds {input.mosdepth_thresholds} \
             --fastp-json {input.fastp_json} \
@@ -295,9 +325,14 @@ rule multiqc:
         # Optional: QUAST reports when the assembler-QC step is enabled.
         # MultiQC scans the results folder regardless, but depending on
         # the report.tsv keeps the dependency graph honest so MultiQC
-        # waits until QUAST has finished before scanning.
+        # waits until QUAST has finished before scanning. One report
+        # per (sample, assembler).
         quast=(
-            expand(f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv", sample=SAMPLES)
+            expand(
+                f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST/report.tsv",
+                sample=SAMPLES,
+                assembler=ASSEMBLERS,
+            )
             if config.get("QUAST", "FALSE") == "TRUE"
             else []
         ),
@@ -334,6 +369,7 @@ rule aggregate_run_information:
         run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
     params:
         results_folder=RESULT_FOLDER,
+        assemblers=ASSEMBLERS,
     log:
         f"{RESULT_FOLDER}/logs/aggregate_run_information.log",
     conda:

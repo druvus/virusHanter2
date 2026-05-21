@@ -57,6 +57,7 @@ on first use.
 | `DEDUPLICATE` | `"FALSE"` | `remove_host` reads the markdup BAM with `-F 1024`; PCR duplicates are excluded from MEGAHIT and the coverage step. Off by default to preserve byte-identical parity. |
 | `QUAST` | `"FALSE"` | `quast_megahit` runs against each sample's MEGAHIT contigs and is fed to MultiQC. Bioconda has no `osx-arm64` build of QUAST; on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
 | `GENOMAD` | `"FALSE"` | `genomad` end-to-end runs alongside CheckV; geNomad's per-contig scores are appended as additive columns in `per_virus_metrics.csv`. Requires `GENOMAD_DB`. |
+| `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/...`. Defaults to both assemblers, which intentionally breaks byte-identical parity with the original `virusHanter` (see `docs/PARITY_NOTES.md`). Set `["MEGAHIT"]` to recover parity. |
 | `COVERAGE_WINDOW` | `100` | Window size (bp) for `mosdepth --by`. Drives coverage-trace resolution in the HTML report. |
 
 Every opt-in is parity-safe by default. When you flip one on, verify

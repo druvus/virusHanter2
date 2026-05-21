@@ -214,7 +214,8 @@ def attribute_contigs(
         if tid is None:
             match_name = getattr(row, "match_name", None)
             if match_name is not None and not pd.isna(match_name):
-                hit_token = str(match_name).split()[0].lower()
+                tokens = str(match_name).split()
+                hit_token = tokens[0].lower() if tokens else ""
                 for candidate_tid, kraken_name in taxid_to_name.items():
                     if hit_token and hit_token in str(kraken_name).lower():
                         tid = candidate_tid
@@ -266,6 +267,7 @@ def build_per_virus_rows(
     human_reads: int,
     top_n: int = 20,
     genomad_summary: dict[str, float] | None = None,
+    assemblers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Top-level join. Returns a DataFrame with the schema documented in
     `docs/PER_VIRUS_OUTPUT.md`.
@@ -301,6 +303,19 @@ def build_per_virus_rows(
     kaiju_by_tid = kaiju_lookup(kaiju_df)
     taxid_to_name = {int(r.taxonomy_id): r.name for r in viral.itertuples()}
     contigs_by_taxid = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
+
+    # Map contig name -> assembler so we can split per-taxid contig
+    # counts by assembler without re-walking the BLAST CSV. When
+    # `assembler` is absent (single-assembler run, no wrangle_pilon
+    # touch yet, or a legacy CSV) every contig is attributed to a
+    # blank assembler and the per-assembler columns are all zero.
+    contig_to_assembler: dict[str, str] = {}
+    if not blastn_df.empty and "assembler" in blastn_df.columns:
+        for r in blastn_df.itertuples():
+            name = getattr(r, "name", None)
+            asm = getattr(r, "assembler", "") or ""
+            if name is not None and not pd.isna(name):
+                contig_to_assembler[str(name)] = str(asm)
 
     # Detect the MEGAHIT-failure-fallback case: the upstream rule
     # writes a single DUMMY_CONTIG sequence when MEGAHIT crashes (most
@@ -374,6 +389,17 @@ def build_per_virus_rows(
             "bases_above_5x": total_ge5x,
             "mean_coverage": mean_cov,
         }
+        # Per-assembler contig counts. Trailing columns; absent when
+        # the caller did not declare an `assemblers` list (legacy
+        # single-assembler call sites stay byte-identical).
+        if assemblers:
+            for asm in assemblers:
+                col = f"{asm.lower()}_contigs"
+                row[col] = sum(
+                    1
+                    for c in attributed_contigs
+                    if contig_to_assembler.get(c, "") == asm
+                )
         if genomad_summary is not None:
             matched = [
                 genomad_summary[c]
@@ -400,7 +426,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--run-name", required=True)
     p.add_argument("--kraken-csv", required=True, type=Path)
     p.add_argument("--kaiju-tsv", required=True, type=Path)
-    p.add_argument("--blastn-csv", required=True, type=Path)
+    p.add_argument(
+        "--blastn-csv",
+        required=True,
+        type=Path,
+        action="append",
+        help=(
+            "Per-assembler BLASTN merged CSV. Repeat the flag once per "
+            "assembler; the CSVs are concatenated and the `assembler` "
+            "column carries through to the per-virus rows."
+        ),
+    )
     p.add_argument("--mosdepth-summary", required=True, type=Path)
     p.add_argument("--mosdepth-thresholds", required=True, type=Path)
     p.add_argument("--fastp-json", required=True, type=Path)
@@ -411,8 +447,10 @@ def parse_args() -> argparse.Namespace:
         "--genomad-summary",
         type=Path,
         default=None,
+        action="append",
         help=(
-            "Optional geNomad <sample>_virus_summary.tsv. When supplied, "
+            "Optional geNomad <sample>_virus_summary.tsv. Repeat once "
+            "per assembler when geNomad is enabled. When supplied, "
             "two trailing columns (genomad_viral_contigs and "
             "genomad_max_virus_score) are appended to the per-virus CSV."
         ),
@@ -428,7 +466,29 @@ def main() -> None:
     kaiju_df = (
         pd.read_csv(args.kaiju_tsv, sep="\t") if args.kaiju_tsv.exists() else pd.DataFrame()
     )
-    blastn_df = pd.read_csv(args.blastn_csv) if args.blastn_csv.exists() else pd.DataFrame()
+
+    # Concatenate every per-assembler BLAST/CheckV merged CSV. Each
+    # has an `assembler` column written by `wrangle_pilon`. Skip
+    # missing or empty files quietly so a failed assembler does not
+    # tear the per-virus aggregation down.
+    blastn_frames: list[pd.DataFrame] = []
+    declared_assemblers: list[str] = []
+    for csv in args.blastn_csv:
+        if not csv.exists() or csv.stat().st_size == 0:
+            continue
+        df_part = pd.read_csv(csv)
+        if "assembler" not in df_part.columns:
+            df_part = df_part.assign(assembler="")
+        blastn_frames.append(df_part)
+        for asm in df_part["assembler"].dropna().unique().tolist():
+            if asm and asm not in declared_assemblers:
+                declared_assemblers.append(str(asm))
+    blastn_df = (
+        pd.concat(blastn_frames, ignore_index=True)
+        if blastn_frames
+        else pd.DataFrame()
+    )
+
     parquet_df = pd.read_parquet(args.virus_parquet)
 
     summary = mosdepth_summary_table(args.mosdepth_summary.read_text())
@@ -437,11 +497,18 @@ def main() -> None:
     total_reads = parse_fastp_total_reads(args.fastp_json.read_text())
     _, human_reads = parse_flagstat(args.flagstat.read_text())
 
-    genomad_summary = (
-        parse_genomad_summary(args.genomad_summary)
-        if args.genomad_summary is not None
-        else None
-    )
+    # Merge per-assembler geNomad summaries into a single contig ->
+    # score dict; identical contig names across assemblers are
+    # vanishingly unlikely (each carries its own k-mer / NODE name)
+    # so a flat dict is sufficient.
+    genomad_summary: dict[str, float] | None
+    if args.genomad_summary:
+        merged: dict[str, float] = {}
+        for p in args.genomad_summary:
+            merged.update(parse_genomad_summary(p))
+        genomad_summary = merged
+    else:
+        genomad_summary = None
 
     df = build_per_virus_rows(
         run_name=args.run_name,
@@ -456,6 +523,7 @@ def main() -> None:
         human_reads=human_reads,
         top_n=args.top_n,
         genomad_summary=genomad_summary,
+        assemblers=declared_assemblers if declared_assemblers else None,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)

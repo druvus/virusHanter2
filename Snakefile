@@ -116,6 +116,23 @@ RUN_GENOMAD_WF = config.get("GENOMAD", "FALSE") == "TRUE"
 # into MultiQC when both are enabled.
 RUN_QUAST_WF = config.get("QUAST", "FALSE") == "TRUE"
 
+# Active de novo assemblers. Each name in ASSEMBLERS drives one
+# independent pipeline through Pilon / BLASTN / CheckV / geNomad /
+# QUAST; outputs accumulate under
+# `{RESULT_FOLDER}/{sample}/{assembler}/`. Default is both MEGAHIT
+# and metaSPAdes. To recover byte-identical parity with the
+# original virusHanter, set ASSEMBLERS: ["MEGAHIT"] in config.
+ASSEMBLERS = list(config.get("ASSEMBLERS", ["MEGAHIT", "SPAdes"]))
+_VALID_ASSEMBLERS = {"MEGAHIT", "SPAdes"}
+_invalid = [a for a in ASSEMBLERS if a not in _VALID_ASSEMBLERS]
+if _invalid:
+    raise WorkflowError(
+        "Unknown assembler(s) in config[ASSEMBLERS]: "
+        + ", ".join(_invalid)
+        + ". Valid choices are: "
+        + ", ".join(sorted(_VALID_ASSEMBLERS))
+    )
+
 # Include rule files
 include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
@@ -144,17 +161,25 @@ rule all:
         # Run-level QC, gated by MULTIQC config flag (default TRUE).
         [f"{RESULT_FOLDER}/multiqc_report.html"] if RUN_MULTIQC else [],
         # Optional geNomad classifier, gated by GENOMAD config flag.
+        # Per-assembler outputs accumulate under
+        # `{sample}/{assembler}/GENOMAD/`.
         (
             expand(
-                f"{RESULT_FOLDER}/{{sample}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+                f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
                 sample=SAMPLES,
+                assembler=ASSEMBLERS,
             )
             if RUN_GENOMAD_WF
             else []
         ),
         # Optional QUAST assembly assessment, gated by QUAST config flag.
+        # One QUAST run per (sample, assembler).
         (
-            expand(f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv", sample=SAMPLES)
+            expand(
+                f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST/report.tsv",
+                sample=SAMPLES,
+                assembler=ASSEMBLERS,
+            )
             if RUN_QUAST_WF
             else []
         ),

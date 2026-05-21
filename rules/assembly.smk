@@ -3,6 +3,12 @@
 # Assembly, polishing, contig annotation, and contamination assessment.
 # Ported from the original virusHanter/Snakefile (rules: megahit, pilon,
 # wrangle_pilon, blastn, checkv, merge_checkv_blastn).
+#
+# Multi-assembler structure: every contig-producing rule below MEGAHIT
+# and metaSPAdes carries an `{assembler}` wildcard so each downstream
+# step (Pilon, BLASTN, CheckV, geNomad, QUAST) runs once per
+# (sample, assembler) pair. The active assembler list lives in
+# config[ASSEMBLERS] and is loaded in Snakefile as `ASSEMBLERS`.
 
 import platform
 
@@ -27,9 +33,23 @@ RUN_GENOMAD = config.get("GENOMAD", "FALSE") == "TRUE"
 GENOMAD_DB = config.get("GENOMAD_DB", "")
 
 # Optional QUAST assembly assessment (off by default). When TRUE,
-# `rule quast_megahit` runs against each sample's MEGAHIT contigs and
+# `rule quast_per_assembler` runs against each (sample, assembler) and
 # its report dir is fed to MultiQC for batch-level QC.
 RUN_QUAST = config.get("QUAST", "FALSE") == "TRUE"
+
+
+def assembler_contigs(wildcards):
+    """Map an {assembler} wildcard to its raw contigs FASTA.
+
+    Lets downstream rules consume the contigs without caring which
+    assembler produced them. Both megahit and metaspades land their
+    output at the same path shape:
+    `{sample}/{assembler}/{sample}.contigs.fa`.
+    """
+    return (
+        f"{RESULT_FOLDER}/{wildcards.sample}/{wildcards.assembler}"
+        f"/{wildcards.sample}.contigs.fa"
+    )
 
 
 # Rule: De novo assembly with MEGAHIT
@@ -149,21 +169,92 @@ rule megahit:
                 f.write("TTAACCTTGG" * 20 + "\n")
 
 
-# Rule: QUAST assembly assessment on the raw MEGAHIT contigs.
+# Rule: De novo assembly with metaSPAdes
+#
+# Runs SPAdes in `--meta` mode on the same host-removed read pool that
+# feeds MEGAHIT. metaSPAdes is markedly less crash-prone than MEGAHIT
+# on Apple Silicon but can still exit non-zero on libraries it
+# considers too small (it imposes a per-library minimum that MEGAHIT
+# does not). The rule mirrors MEGAHIT's "dummy contig on failure"
+# fallback so the per-assembler DAG stays uniform; downstream rules do
+# not need to special-case an absent SPAdes output.
+rule metaspades:
+    input:
+        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
+        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+    output:
+        contigs=f"{RESULT_FOLDER}/{{sample}}/SPAdes/{{sample}}.contigs.fa",
+    params:
+        out_dir=f"{RESULT_FOLDER}/{{sample}}/SPAdes",
+    threads: THREADS
+    resources:
+        mem_mb=32000,
+        runtime=360,
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/metaspades.log",
+    conda:
+        "../envs/spades.yaml"
+    run:
+        import subprocess
+
+        shell("rm -rf {params.out_dir}")
+        shell("mkdir -p {params.out_dir}")
+
+        # metaSPAdes uses a JVM-style memory cap in gigabytes; round
+        # the Snakemake mem_mb resource down. Default to 16 G when
+        # the resources block is not honoured (e.g. local cores run).
+        mem_gb = max(8, int(resources.mem_mb / 1024))
+
+        try:
+            shell(
+                "spades.py --meta "
+                "-1 {input.r1} -2 {input.r2} "
+                "-o {params.out_dir} "
+                f"-t {threads} "
+                f"-m {mem_gb} "
+                "--only-assembler "
+                "> {log} 2>&1"
+            )
+        except subprocess.CalledProcessError:
+            # metaSPAdes refuses libraries below its internal minimum
+            # and exits non-zero. Continue to the fallback below so
+            # the rest of the DAG still has an input.
+            pass
+
+        spades_contigs = Path(params.out_dir) / "contigs.fasta"
+        if spades_contigs.exists() and spades_contigs.stat().st_size > 0:
+            shell(f"mv {spades_contigs} {{output.contigs}}")
+        else:
+            # Dummy contig fallback. Mirrors the MEGAHIT rule's
+            # behaviour and keeps Pilon / BLASTN / CheckV happy.
+            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
+            with open(output.contigs, "w") as f:
+                f.write(">DUMMY_CONTIG\n")
+                f.write("TTAACCTTGG" * 20 + "\n")
+
+        # Strip SPAdes intermediates; keep the contigs FASTA only.
+        shell(
+            "ls -d -1 {params.out_dir}/* 2>/dev/null "
+            "| grep -v .contigs.fa | xargs rm -rf || true"
+        )
+
+
+# Rule: QUAST assembly assessment on the raw assembler contigs.
 #
 # Reports N50, largest contig, total assembled length, GC% and other
-# standard assembly metrics. Runs on the un-polished MEGAHIT output so
-# the metrics describe the assembler's behaviour directly; Pilon
-# improvements are a separate concern. Output is consumed by MultiQC.
-rule quast_megahit:
+# standard assembly metrics. Runs on the un-polished assembler output
+# so the metrics describe the assembler's behaviour directly; Pilon
+# improvements are a separate concern. One QUAST report per
+# (sample, assembler); the report dir is consumed by MultiQC.
+rule quast_per_assembler:
     input:
-        contigs=rules.megahit.output.contigs,
+        contigs=assembler_contigs,
     output:
-        report_dir=directory(f"{RESULT_FOLDER}/{{sample}}/QUAST"),
-        report_tsv=f"{RESULT_FOLDER}/{{sample}}/QUAST/report.tsv",
+        report_dir=directory(f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST"),
+        report_tsv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST/report.tsv",
     threads: 2
     log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/quast.log",
+        f"{RESULT_FOLDER}/{{sample}}/logs/quast_{{assembler}}.log",
     conda:
         "../envs/quast.yaml"
     shell:
@@ -171,24 +262,24 @@ rule quast_megahit:
         quast.py \
             --threads {threads} \
             --output-dir {output.report_dir} \
-            --labels {wildcards.sample} \
+            --labels {wildcards.sample}_{wildcards.assembler} \
             {input.contigs} \
             > {log} 2>&1
         """
 
 
-# Rule: Polish contigs with Pilon
+# Rule: Polish contigs with Pilon (per assembler)
 rule pilon:
     input:
-        contigs=rules.megahit.output.contigs,
+        contigs=assembler_contigs,
         r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
         r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
     output:
-        contigs_bam=f"{RESULT_FOLDER}/{{sample}}/PILON/{{sample}}_contigs.bam",
-        improved_contigs=f"{RESULT_FOLDER}/{{sample}}/PILON/{{sample}}_improved_contigs.fasta",
+        contigs_bam=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_contigs.bam",
+        improved_contigs=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_improved_contigs.fasta",
     params:
-        index_folder=f"{RESULT_FOLDER}/{{sample}}/PILON/bwa",
-        pilon_folder=f"{RESULT_FOLDER}/{{sample}}/PILON",
+        index_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/bwa",
+        pilon_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON",
         pilon_mem=PILON_MEM,
     threads: THREADS
     resources:
@@ -197,7 +288,7 @@ rule pilon:
         mem_mb=PILON_MEM_MB,
         runtime=240,
     log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/pilon.log",
+        f"{RESULT_FOLDER}/{{sample}}/logs/pilon_{{assembler}}.log",
     conda:
         "../envs/pilon.yaml"
     run:
@@ -229,37 +320,45 @@ rule pilon:
 
 
 # Rule: Convert polished contigs FASTA into a length-filtered CSV
+#
+# Carries the {assembler} wildcard into a column on the CSV so every
+# downstream consumer (BLASTN merge, per_virus_metrics, the report)
+# knows which assembler produced each contig without re-deriving it
+# from the file path.
 rule wrangle_pilon:
     input:
         contigs=rules.pilon.output.improved_contigs,
     output:
-        csv=f"{RESULT_FOLDER}/{{sample}}/PILON/{{sample}}.contigs.csv",
+        csv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}.contigs.csv",
     params:
         min_len=CONTIG_LENGTH,
     conda:
         "../envs/panel.yaml"
     run:
         df = fastx_file_to_df(input.contigs)
-        df = df.assign(sample_id=wildcards.sample)
+        df = df.assign(
+            sample_id=wildcards.sample,
+            assembler=wildcards.assembler,
+        )
         df = df.loc[lambda x: x.read_len > params.min_len]
         df.to_csv(output.csv, index=False)
 
 
-# Rule: Annotate contigs with BLASTN
+# Rule: Annotate contigs with BLASTN (per assembler)
 rule blastn:
     input:
         contigs=rules.wrangle_pilon.output.csv,
     output:
-        blast=f"{RESULT_FOLDER}/{{sample}}/BLASTN/{{sample}}.contigs.blastn.csv",
+        blast=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/BLASTN/{{sample}}.contigs.blastn.csv",
     params:
-        temp_file=f"{RESULT_FOLDER}/{{sample}}/BLASTN/temp.blastn.fasta",
+        temp_file=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/BLASTN/temp.blastn.fasta",
         db=BLASTN_DB,
     threads: THREADS
     resources:
         mem_mb=8000,
         runtime=240,
     log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/blastn.log",
+        f"{RESULT_FOLDER}/{{sample}}/logs/blastn_{{assembler}}.log",
     conda:
         "../envs/blastn.yaml"
     run:
@@ -276,21 +375,21 @@ rule blastn:
             os.remove(params.temp_file)
 
 
-# Rule: Assess host contamination of contigs with CheckV
+# Rule: Assess host contamination of contigs with CheckV (per assembler)
 rule checkv:
     input:
         contigs=rules.pilon.output.improved_contigs,
     output:
-        checkv=f"{RESULT_FOLDER}/{{sample}}/CHECKV/{{sample}}.contamination.tsv",
+        checkv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/CHECKV/{{sample}}.contamination.tsv",
     params:
         db=CHECKV_DB,
-        folder=f"{RESULT_FOLDER}/{{sample}}/CHECKV",
+        folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/CHECKV",
     threads: THREADS
     resources:
         mem_mb=8000,
         runtime=120,
     log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/checkv.log",
+        f"{RESULT_FOLDER}/{{sample}}/logs/checkv_{{assembler}}.log",
     conda:
         "../envs/checkv.yaml"
     shell:
@@ -322,7 +421,7 @@ rule merge_checkv_blastn:
         checkv=rules.checkv.output.checkv,
         blastn=rules.blastn.output.blast,
     output:
-        merged_csv=f"{RESULT_FOLDER}/{{sample}}/CHECKV/{{sample}}.merged.csv",
+        merged_csv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/CHECKV/{{sample}}.merged.csv",
     conda:
         "../envs/panel.yaml"
     run:
@@ -337,35 +436,33 @@ rule merge_checkv_blastn:
         # Inner join on `name` matches the original virusHanter behaviour:
         # contigs without a CheckV entry are dropped from the merged table.
         merged = pd.merge(blastn_df, checkv_df, on="name", how="inner")
+        # `assembler` is added by wrangle_pilon and flows through BLASTN;
+        # belt-and-braces in case the CSV was rewritten without it.
+        if "assembler" not in merged.columns:
+            merged = merged.assign(assembler=wildcards.assembler)
         merged.to_csv(output.merged_csv, index=False)
 
 
-# Rule: Optional second viral-contig classifier (geNomad).
+# Rule: Optional second viral-contig classifier (geNomad), per assembler.
 #
 # Off by default. Turn on with `GENOMAD: "TRUE"` and a populated
-# `GENOMAD_DB` in config. Stores a summary TSV under GENOMAD/ alongside
-# the existing CheckV outputs. Does NOT feed the per-sample HTML or
-# the run-aggregation CSV; the merged_csv schema and every other
-# parity-locked output stay byte-identical.
-#
-# Pulls the Pilon-polished contigs (same input CheckV uses) and runs
-# `genomad end-to-end` to classify each contig as plasmid, viral, or
-# chromosomal. The summary file is the per-sample headline output:
-# `<sample>_summary/<sample>_virus_summary.tsv`.
+# `GENOMAD_DB` in config. One geNomad run per (sample, assembler);
+# the per-assembler summary TSV is the headline output:
+# `<sample>/<assembler>/GENOMAD/<sample>_summary/<sample>_virus_summary.tsv`.
 rule genomad:
     input:
         contigs=rules.pilon.output.improved_contigs,
     output:
-        summary=f"{RESULT_FOLDER}/{{sample}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+        summary=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
     params:
         db=GENOMAD_DB,
-        out_dir=f"{RESULT_FOLDER}/{{sample}}/GENOMAD",
+        out_dir=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD",
     threads: THREADS
     resources:
         mem_mb=16000,
         runtime=240,
     log:
-        f"{RESULT_FOLDER}/{{sample}}/logs/genomad.log"
+        f"{RESULT_FOLDER}/{{sample}}/logs/genomad_{{assembler}}.log"
     conda:
         "../envs/genomad.yaml"
     shell:

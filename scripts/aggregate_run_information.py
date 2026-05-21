@@ -51,11 +51,44 @@ def _databases_used_string(cfg: dict) -> str:
     return ";".join(parts)
 
 
+def _parse_quast_report(report_tsv: Path) -> dict[str, float | int]:
+    """Pull n_contigs and N50 out of a QUAST ``report.tsv``.
+
+    QUAST writes a two-column TSV: ``Assembly`` then a single sample
+    column. Returns an empty dict on a missing or malformed file so
+    the caller can degrade gracefully.
+    """
+    out: dict[str, float | int] = {}
+    if not report_tsv.exists() or report_tsv.stat().st_size == 0:
+        return out
+    try:
+        with open(report_tsv) as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 2:
+                    continue
+                key, value = parts[0].strip(), parts[1].strip()
+                if key == "# contigs":
+                    try:
+                        out["n_contigs"] = int(value)
+                    except ValueError:
+                        continue
+                elif key == "N50":
+                    try:
+                        out["n50"] = int(value)
+                    except ValueError:
+                        continue
+    except OSError:
+        return {}
+    return out
+
+
 def aggregate_sample_info(
     sample_folder: Path,
     *,
     databases_used: str = "",
     reporthanter_version: str = "",
+    assemblers: list[str] | None = None,
 ) -> pd.DataFrame:
     sample_folder = sample_folder.resolve()
     sample_name = sample_folder.name
@@ -132,12 +165,39 @@ def aggregate_sample_info(
         for row in kaiju_df.head(10).itertuples()
     )
 
-    blastn_csv = sample_folder / "BLASTN" / f"{sample_name}.contigs.blastn.csv"
-    if blastn_csv.exists():
-        blastn_df = pd.read_csv(blastn_csv)
-        blastn_report = read_file_as_blob(blastn_csv)
+    # Read every per-assembler BLASTN CSV under
+    # `{sample_folder}/{assembler}/BLASTN/...` and concatenate. The
+    # `assembler` column comes through from `wrangle_pilon`. A blob of
+    # the concatenated CSV is stored under `blastn_report` so the
+    # parity-locked column still carries the full BLAST table.
+    asm_list = list(assemblers) if assemblers else ["MEGAHIT"]
+    blastn_frames: list[pd.DataFrame] = []
+    for asm in asm_list:
+        csv = sample_folder / asm / "BLASTN" / f"{sample_name}.contigs.blastn.csv"
+        if csv.exists() and csv.stat().st_size > 0:
+            frame = pd.read_csv(csv)
+            if "assembler" not in frame.columns:
+                frame = frame.assign(assembler=asm)
+            blastn_frames.append(frame)
+    blastn_df = (
+        pd.concat(blastn_frames, ignore_index=True)
+        if blastn_frames
+        else pd.DataFrame()
+    )
+
+    # `blastn_report` keeps the parity-locked hex-encoded blob shape.
+    # When multiple assemblers contribute, persist the concatenated
+    # CSV to a temp path long enough to read_file_as_blob it.
+    if not blastn_df.empty:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as tmp:
+            blastn_df.to_csv(tmp.name, index=False)
+            blastn_report = read_file_as_blob(Path(tmp.name))
+            Path(tmp.name).unlink(missing_ok=True)
     else:
-        blastn_df = pd.DataFrame()
         blastn_report = ""
 
     number_contigs = len(blastn_df)
@@ -153,31 +213,54 @@ def aggregate_sample_info(
     else:
         top_contigs_blastn = ""
 
+    # Per-assembler trailing diagnostics: contig count, QUAST n_contigs
+    # / N50 (when QUAST is enabled). Always emitted so the column set
+    # stays stable across samples within a batch, even when a sample
+    # produced zero contigs from one assembler.
+    per_asm_columns: dict[str, int | float | str] = {}
+    for asm in asm_list:
+        if not blastn_df.empty and "assembler" in blastn_df.columns:
+            per_asm_columns[f"{asm.lower()}_n_contigs"] = int(
+                (blastn_df["assembler"] == asm).sum()
+            )
+        else:
+            per_asm_columns[f"{asm.lower()}_n_contigs"] = 0
+        quast_tsv = sample_folder / asm / "QUAST" / "report.tsv"
+        quast_stats = _parse_quast_report(quast_tsv)
+        per_asm_columns[f"{asm.lower()}_n50"] = quast_stats.get("n50", "")
+    assemblers_used = ";".join(asm_list)
+
     # Optional geNomad summary. Only present when the workflow ran
-    # with GENOMAD: "TRUE". Adds two additive columns at the trailing
-    # end of the run-info CSV: the count of contigs geNomad called
-    # viral and the highest virus_score among them.
+    # with GENOMAD: "TRUE". Sums across per-assembler summaries when
+    # multi-assembler mode is on; the column shape is unchanged so a
+    # column-dropped diff against pre-multi-assembler runs is clean.
     genomad_viral_contigs: int | str = ""
     genomad_max_virus_score: float | str = ""
-    genomad_path = (
-        sample_folder
-        / "GENOMAD"
-        / f"{sample_name}_summary"
-        / f"{sample_name}_virus_summary.tsv"
-    )
-    if genomad_path.exists() and genomad_path.stat().st_size > 0:
-        try:
-            gdf = pd.read_csv(genomad_path, sep="\t")
-            if "virus_score" in gdf.columns:
-                genomad_viral_contigs = int(len(gdf))
-                if len(gdf):
-                    genomad_max_virus_score = float(gdf["virus_score"].max())
-        except Exception:  # noqa: BLE001
-            # Leave the columns blank if the TSV is malformed; the
-            # rest of the run-info row should still land.
-            pass
+    genomad_totals: list[int] = []
+    genomad_maxes: list[float] = []
+    for asm in asm_list:
+        genomad_path = (
+            sample_folder
+            / asm
+            / "GENOMAD"
+            / f"{sample_name}_summary"
+            / f"{sample_name}_virus_summary.tsv"
+        )
+        if genomad_path.exists() and genomad_path.stat().st_size > 0:
+            try:
+                gdf = pd.read_csv(genomad_path, sep="\t")
+                if "virus_score" in gdf.columns:
+                    genomad_totals.append(int(len(gdf)))
+                    if len(gdf):
+                        genomad_maxes.append(float(gdf["virus_score"].max()))
+            except Exception:  # noqa: BLE001
+                continue
+    if genomad_totals:
+        genomad_viral_contigs = int(sum(genomad_totals))
+    if genomad_maxes:
+        genomad_max_virus_score = float(max(genomad_maxes))
 
-    return pd.DataFrame([{
+    row = {
         "run_name": run_name,
         "sample_name": sample_name,
         "date": date,
@@ -210,7 +293,16 @@ def aggregate_sample_info(
         # across batches and across DB / reporthanter refreshes.
         "databases_used": databases_used,
         "reporthanter_version": reporthanter_version,
-    }])
+        # Trailing multi-assembler diagnostics. `assemblers_used` is a
+        # semicolon-delimited list of assemblers run for this sample;
+        # per-assembler trailing columns (`{assembler}_n_contigs`,
+        # `{assembler}_n50`) carry the equivalent of QUAST's headline
+        # numbers when QUAST is enabled. Empty / zero on runs that did
+        # not enable QUAST for that assembler.
+        "assemblers_used": assemblers_used,
+    }
+    row.update(per_asm_columns)
+    return pd.DataFrame([row])
 
 
 def main() -> None:
@@ -221,12 +313,14 @@ def main() -> None:
 
     databases_used = _databases_used_string(dict(sm.config))
     reporthanter_version = getattr(reporthanter, "__version__", "")
+    assemblers = list(sm.params.get("assemblers", ["MEGAHIT"]))
 
     rows = [
         aggregate_sample_info(
             results_folder / sample,
             databases_used=databases_used,
             reporthanter_version=reporthanter_version,
+            assemblers=assemblers,
         )
         for sample in samples
     ]

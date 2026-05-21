@@ -117,6 +117,24 @@ properties:
       report is included in the MultiQC aggregate. Off by default;
       enables N50, largest contig, total assembled length and similar
       assembly metrics for batch-level QC triage.
+  ASSEMBLERS:
+    type: array
+    items:
+      type: string
+      enum: ["MEGAHIT", "SPAdes"]
+    minItems: 1
+    uniqueItems: true
+    default: ["MEGAHIT", "SPAdes"]
+    description: |
+      List of de novo assemblers to run on the host-removed read pool.
+      Each assembler runs independently through Pilon, BLASTN, CheckV
+      and (when enabled) geNomad / QUAST; per-assembler results
+      accumulate under
+      `{RESULTS_FOLDER}/{batch}/{sample}/{assembler}/`. The report
+      and per-virus aggregation combine the per-assembler tables
+      and add an `assembler` column. To recover byte-identical
+      parity with the original `virusHanter`, set this to
+      ["MEGAHIT"].
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.

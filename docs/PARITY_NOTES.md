@@ -212,6 +212,40 @@ Production Linux runs are unaffected — both `_popcnt` and
 flag is gated on the platform check, so it imposes no
 assembly-quality concession on Linux.
 
+## 2026-05-21: Multi-assembler mode (MEGAHIT + metaSPAdes)
+
+`ASSEMBLERS: ["MEGAHIT", "SPAdes"]` is now the default. Every
+contig-producing rule (Pilon, BLASTN, CheckV, geNomad and QUAST when
+enabled) runs once per (sample, assembler) and lands under
+`{sample}/{assembler}/...`. The report's "Classification of Contigs"
+tab carries an `assembler` column and the BLAST headline bar chart
+splits per assembler. The per-virus CSV gains trailing
+`{assembler}_contigs` columns; the run-info CSV gains
+`assemblers_used` plus `{assembler}_n_contigs` / `{assembler}_n50`.
+
+This is a **deliberate parity break**:
+
+- `number_of_contigs` in `run_information_<batch>.csv` now sums
+  contigs across all active assemblers, so the value will differ
+  from a MEGAHIT-only baseline.
+- `top_contigs_blastn` selects from the union; the top five may
+  include rows from either assembler.
+- The HTML report's contig table now has an extra leading column.
+
+To recover byte-identical parity with the original `virusHanter`,
+set `ASSEMBLERS: ["MEGAHIT"]` in the config. Every other rule then
+behaves exactly as before: paths still carry the `{assembler}`
+wildcard but the wildcard takes a single value, so the BLAST /
+CheckV merged CSVs sit at `{sample}/MEGAHIT/BLASTN/...` rather than
+the original `{sample}/BLASTN/...`. The CSV columns added in this
+session are all trailing and can be dropped before diffing.
+
+Apple Silicon: bioconda has `osx-arm64` builds for `spades>=3.15.5`
+so metaSPAdes runs alongside MEGAHIT on a Mac without
+`CONDA_SUBDIR=osx-64`. The rule mirrors MEGAHIT's "dummy contig on
+failure" fallback so a SPAdes refusal (it imposes a per-library
+minimum) does not tear the DAG down.
+
 ## 2026-05-19: `bam2plot` retired
 
 The `bam2plot` rule that produced `COVERAGE_PLOTS/*.svg` and the
