@@ -161,6 +161,12 @@ COVERAGE_RANK_FILTER = list(
     config.get(
         "COVERAGE_RANK_FILTER",
         [
+            # NCBI's pseudo-root for the viral subtree. Without it,
+            # the bare "Viruses" taxid (10239) propagates from
+            # Kraken into the unmapped sidecar on every clinical
+            # sample because viral RefSeq does not carry a
+            # reference for the root.
+            "acellular root",
             "realm",
             "kingdom",
             "subkingdom",

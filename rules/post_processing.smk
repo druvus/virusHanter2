@@ -81,6 +81,26 @@ rule bwa_align_to_kraken_hits:
         )
         acc_to_tax = parquet_accession_to_taxid(virus_db_df)
 
+        # Inverse index from genus_taxid to a representative parquet
+        # tax_id under that genus. Used by the walk-up fallback when
+        # a classifier hit is absent from the parquet AND the genus
+        # itself is also absent (typical for viral RefSeq, which
+        # has no genus-level references — only species-level rows
+        # that carry the genus as a column). We pick the longest
+        # sequence under each genus as the representative.
+        genus_to_rep_taxid: dict[int, int] = {}
+        if "genus_taxid" in virus_db_df.columns:
+            sub = virus_db_df.loc[virus_db_df["genus_taxid"] > 0].copy()
+            if not sub.empty:
+                sub = sub.assign(_seqlen=sub["sequence"].str.len())
+                sub = sub.sort_values(
+                    ["genus_taxid", "_seqlen"],
+                    ascending=[True, False],
+                    kind="mergesort",
+                )
+                for r in sub.drop_duplicates(subset=["genus_taxid"], keep="first").itertuples():
+                    genus_to_rep_taxid[int(r.genus_taxid)] = int(r.tax_id)
+
         # Optional taxdump-driven rank lookup. When TAXDUMP_NODES is
         # empty or the file is missing, the rank filter and walk-up
         # both degrade to no-ops; the rule still produces the bare
@@ -121,18 +141,30 @@ rule bwa_align_to_kraken_hits:
                     names_for_tid[tid] = name
                 return
             # Walk up to the genus and substitute a representative
-            # genus reference when one exists in the parquet. The
-            # source tag carries the ``->genus`` suffix so the
-            # reviewer sees the fallback in the coverage tab label.
+            # parquet reference for that genus. Two-step:
+            #   1. Resolve the genus_tid via the taxdump.
+            #   2. Look the genus_tid up in the parquet by tax_id
+            #      first, then by ``genus_taxid`` column (the typical
+            #      case for viral RefSeq, which has no genus-level
+            #      references — only species rows tagged with their
+            #      genus).
+            # The substitution tags the source with ``->genus`` so
+            # the reviewer sees the fallback in the coverage tab
+            # label.
             if params.coverage_genus_walkup and nodes:
                 genus_tid = find_genus_taxid(tid, nodes)
-                if genus_tid and genus_tid in parquet_tax_ids:
-                    sources_for_tid.setdefault(genus_tid, set()).add(
-                        f"{source}->genus"
-                    )
-                    if name and genus_tid not in names_for_tid:
-                        names_for_tid[genus_tid] = name
-                    return
+                if genus_tid:
+                    if genus_tid in parquet_tax_ids:
+                        rep = genus_tid
+                    else:
+                        rep = genus_to_rep_taxid.get(genus_tid, 0)
+                    if rep:
+                        sources_for_tid.setdefault(rep, set()).add(
+                            f"{source}->genus"
+                        )
+                        if name and rep not in names_for_tid:
+                            names_for_tid[rep] = name
+                        return
             unmapped_rows.append((tid, name, source, "absent_from_parquet"))
 
         if "KRAKEN" in params.coverage_sources:

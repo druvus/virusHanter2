@@ -132,6 +132,7 @@ properties:
     items:
       type: string
     default:
+      - "acellular root"
       - "realm"
       - "kingdom"
       - "subkingdom"
