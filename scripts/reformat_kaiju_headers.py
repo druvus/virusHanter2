@@ -54,9 +54,16 @@ def reformat_record(header: str, taxid: int) -> str:
     ``header`` is the raw FASTA header line (with or without the
     leading ``>``). ``taxid`` is the NCBI taxonomy id resolved for
     the record's accession.
+
+    Kaiju's ``kaiju-mkbwt`` parses the FASTA header as a single
+    integer taxid — anything else (including the
+    ``kaiju|<taxid>|<accession>`` format documented on some
+    third-party pages) is mis-parsed as the trailing numeric
+    portion of the accession. The original accession is dropped;
+    Kaiju doesn't need it because classification reports only the
+    taxid.
     """
-    acc, _ = _accession_from_header(header)
-    return f">kaiju|{taxid}|{acc}"
+    return f">{taxid}"
 
 
 def collect_wanted_accessions(faa_path: Path) -> set[str]:

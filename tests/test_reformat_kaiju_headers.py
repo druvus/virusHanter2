@@ -17,14 +17,14 @@ from scripts.reformat_kaiju_headers import (  # noqa: E402
 )
 
 
-def test_reformat_record_strips_version_when_using_base():
-    out = reformat_record(">YP_009144834.1 hypothetical protein", 100)
-    assert out == ">kaiju|100|YP_009144834.1"
-
-
-def test_reformat_record_preserves_versioned_token():
-    out = reformat_record(">NP_001234.5 description text", 42)
-    assert out == ">kaiju|42|NP_001234.5"
+def test_reformat_record_emits_bare_taxid_header():
+    # Kaiju's mkbwt expects `>TAXID` (a single integer); any other
+    # format is mis-parsed as the trailing numeric portion of the
+    # accession token. Verified empirically with a synthetic read
+    # that round-tripped through `kaiju|<taxid>|<acc>` returning
+    # the accession digits rather than the taxid.
+    assert reformat_record(">YP_009144834.1 hypothetical protein", 100) == ">100"
+    assert reformat_record(">NP_001234.5 description text", 42) == ">42"
 
 
 def test_collect_wanted_accessions_indexes_versioned_and_base(tmp_path):
@@ -72,8 +72,8 @@ def test_stream_reformatted_fasta_emits_kaiju_headers(tmp_path):
     assert written == 2
     assert dropped == 1
     text = out.read_text()
-    assert ">kaiju|100|YP_001.1" in text
-    assert ">kaiju|200|YP_002.1" in text
+    assert ">100\n" in text
+    assert ">200\n" in text
     # Sequence lines for kept records survive in order.
     assert "MAA" in text
     assert "ABC" in text
