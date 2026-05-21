@@ -8,3 +8,10 @@ dependencies:
   - pyfastx>=2.1
   - wget
   - gzip
+  # kraken2 is needed only for the `kraken2-inspect` call that
+  # produces the overlap-with-Kraken2 sidecar; the index itself
+  # comes from NCBI's pre-built tarball, not from this env.
+  - kraken2
+  # kaiju ships `kaiju-mkbwt` + `kaiju-mkfmi` for the local
+  # protein-index build.
+  - kaiju

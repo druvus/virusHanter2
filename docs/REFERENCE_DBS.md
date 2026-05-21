@@ -78,10 +78,24 @@ of classifier viral taxids, and by `per_virus_metrics` to attribute
 contigs and aggregate coverage per taxid.
 
 The rebuild is driven by a standalone Snakemake workflow under
-`refresh/`. The workflow downloads the NCBI viral nucleotide FASTA
-and the matching `nucl_gb.accession2taxid.gz`, runs the bounded-memory
-builder, and emits a `build_stats.json` sidecar so the operator can
-see the headline numbers without re-reading the parquet.
+`refresh/`. The workflow:
+
+- recursively downloads every `viral.N.1.genomic.fna.gz` part from
+  the NCBI RefSeq viral FTP directory (previous builds only pulled
+  `viral.1.1` by accident, which dropped roughly half the release);
+- additionally pulls every `viral.N.protein.faa.gz` part and builds
+  a matching Kaiju FMI index (`kaiju_refseq_viral.fmi`) — the same
+  RefSeq snapshot drives both the BWA nucleotide reference set and
+  the Kaiju protein classifier, closing the documented Anelloviridae
+  / Pegiviridae gap of NCBI's pre-built `kaiju/viruses/` DB;
+- pulls the universal `nucl_gb.accession2taxid.gz`,
+  `prot.accession2taxid.gz` and `taxdump.tar.gz` so the parquet's
+  rank-filter / genus-walk-up enrichment and the Kaiju header
+  rewrite all share the same NCBI taxonomy snapshot;
+- runs the bounded-memory builder and emits a `build_stats.json`
+  sidecar with headline counts plus, after the overlap check, the
+  intersection size between the parquet and the production Kraken2
+  viral DB.
 
 ```
 conda activate virushanter

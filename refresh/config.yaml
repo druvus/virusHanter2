@@ -11,12 +11,21 @@
 # config points at via VIRUS_PARQUET.
 OUTPUT_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
 
-# Working directory for the FASTA and accession2taxid downloads.
-# Pick a location with at least 20 GB free.
+# Working directory for the FASTA, accession2taxid and taxdump
+# downloads. Pick a location with at least 40 GB free.
 DOWNLOAD_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
 
+# Production Kraken2 viral DB. The `compare_with_kraken2` rule
+# calls `kraken2-inspect` against this DB to compute overlap with
+# the parquet's taxid universe and writes the result to a sidecar
+# TSV next to the parquet.
+KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+
 # Source URLs. Override if you want a different snapshot. The
-# defaults pull the NCBI viral nucleotide FASTA and the matching
-# nucleotide accession2taxid.
-# NCBI_VIRUS_FASTA_URL: "https://ftp.ncbi.nlm.nih.gov/refseq/release/viral/viral.1.1.genomic.fna.gz"
-# ACCESSION2TAXID_URL:  "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/nucl_gb.accession2taxid.gz"
+# defaults pull the full multi-part NCBI viral RefSeq release
+# (genomic + protein) and the matching nucleotide + protein
+# accession2taxid mappings.
+# REFSEQ_VIRAL_URL_DIR:     "https://ftp.ncbi.nlm.nih.gov/refseq/release/viral/"
+# ACCESSION2TAXID_URL:      "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/nucl_gb.accession2taxid.gz"
+# PROT_ACCESSION2TAXID_URL: "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.gz"
+# TAXDUMP_URL:              "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
