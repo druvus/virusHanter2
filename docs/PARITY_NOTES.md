@@ -212,6 +212,55 @@ Production Linux runs are unaffected — both `_popcnt` and
 flag is gated on the platform check, so it imposes no
 assembly-quality concession on Linux.
 
+## 2026-05-21: Multi-source coverage reference set
+
+`bwa_align_to_kraken_hits` previously picked the Kraken2 top-20
+viral taxa, intersected them with `VIRUS_PARQUET`, and aligned the
+host-removed reads to the resulting FASTA. The mosdepth chrom set
+therefore reflected only Kraken's evidence, and only that subset
+of Kraken's taxa for which `VIRUS_PARQUET` had a reference. Kaiju
+hits never entered the coverage step. BLASTN hits from the
+assembled contigs never entered the coverage step either, so a
+sample where the assemblers recovered a herpesvirus contig still
+got no coverage trace for that virus when Kraken's herpesvirus
+percent fell outside the hard-coded top-20.
+
+The rule's `run:` block has been rewritten to take the union of
+the configured `COVERAGE_SOURCES` (default
+`["KRAKEN", "KAIJU", "BLAST"]`):
+
+- KRAKEN: as before, top-`COVERAGE_TOP_N` by percent (default 20).
+- KAIJU: top-N by percent from `kaiju_to_table`, filtered against
+  `VIRUS_PARQUET`'s tax_id set so non-viral RefSeq hits do not
+  enter.
+- BLAST: every per-assembler merged CSV; accessions are resolved
+  to taxids via the new `parquet_accession_to_taxid` helper in
+  `scripts/functions.py`.
+
+The output sidecar `virus_names` gains a trailing `sources`
+column (`kraken`, `kaiju`, `blast`, or semicolon-delimited
+combinations). A new `unmapped_taxids.tsv` sidecar per sample
+lists classified taxids that had no reference in
+`VIRUS_PARQUET`, so the reviewer can see which evidence was
+dropped and which families (e.g. specific Anelloviridae strains)
+need a parquet rebuild.
+
+This is a **deliberate parity break**:
+
+- The mosdepth chrom set is no longer Kraken-top-20 only; it is
+  the union over `COVERAGE_SOURCES`. The Alignment Coverage panel
+  in the per-sample report shows more tabs (typically 20–50
+  rather than 5–15).
+- The `virus_names` sidecar grows from three columns to four;
+  reportHanter v0.5.1 reads the optional `sources` column
+  back-compat with three-column sidecars from older runs.
+
+To recover byte-identical behaviour with the pre-this-change
+runs, set `COVERAGE_SOURCES: ["KRAKEN"]` and
+`COVERAGE_TOP_N: 20`. The `virus_names` file then still carries
+the new column but every row's `sources` value is `kraken`, so
+the column can be dropped before diffing.
+
 ## 2026-05-21: Multi-assembler mode (MEGAHIT + metaSPAdes)
 
 `ASSEMBLERS: ["MEGAHIT", "SPAdes"]` is now the default. Every

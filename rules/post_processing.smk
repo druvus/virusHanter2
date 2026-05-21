@@ -19,19 +19,42 @@ NUMBER_OF_PLOTS = config["NUMBER_OF_PLOTS"]
 COVERAGE_WINDOW = int(config.get("COVERAGE_WINDOW", 100))
 SECONDARY_HOST_NAME = config.get("SECONDARY_HOST_NAME", "")
 
-# Rule: Align reads to top Kraken2 viral hits
+# Rule: Build a per-sample reference set from the union of every
+# enabled classifier's viral hits and align reads to it.
+#
+# Sources (each can be enabled or disabled via config[COVERAGE_SOURCES]):
+#   - KRAKEN: top-N viral taxa from the wrangled Kraken2 CSV.
+#   - KAIJU: top-N viral taxa from the kaiju2table output, filtered
+#     against VIRUS_PARQUET so non-viral RefSeq hits (Kaiju's default
+#     refseq DB is broader than viral) do not enter.
+#   - BLAST: every per-assembler merged BLAST CSV; taxids are
+#     resolved through VIRUS_PARQUET's accession lookup.
+#
+# Outputs include a `unmapped_taxids.tsv` sidecar listing classified
+# taxids that VIRUS_PARQUET has no reference for, so the reviewer can
+# see why a hit did not produce a coverage trace. The `virus_names`
+# sidecar gains a `sources` column tagging each chrom with the
+# classifier(s) that contributed it.
 rule bwa_align_to_kraken_hits:
     input:
         kraken_csv=rules.wrangle_kraken.output.kraken_csv,
+        kaiju_table=rules.kaiju_to_table.output.kaiju_table,
+        blastn_csvs=expand(
+            f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/CHECKV/{{{{sample}}}}.merged.csv",
+            assembler=ASSEMBLERS,
+        ),
         r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
         r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
     output:
         virus_fasta=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_viruses.fasta",
         virus_names=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_virus_names.tsv",
+        unmapped_taxids=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/unmapped_taxids.tsv",
         bam=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/{{sample}}_kraken.bam",
     params:
         virus_db=VIRUS_PARQUET,
         index_prefix=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/bwa/{{sample}}",
+        coverage_sources=COVERAGE_SOURCES,
+        coverage_top_n=COVERAGE_TOP_N,
     threads: THREADS
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_kraken.log"
@@ -41,34 +64,127 @@ rule bwa_align_to_kraken_hits:
         import pandas as pd
         from pathlib import Path
 
-        # Read top Kraken2 viral taxa: select the 20 with the highest
-        # percent classified, matching the original virusHanter ordering.
-        kraken_df = pd.read_csv(input.kraken_csv)
-        top_viral = (
-            kraken_df.loc[kraken_df.domain == "Viruses"]
-            .sort_values("percent", ascending=False)
-            .head(20)
-        )
-        top_tax_ids = top_viral["taxonomy_id"].tolist()
-        tax_to_name = dict(zip(top_viral["taxonomy_id"], top_viral["name"]))
+        from scripts.functions import parquet_accession_to_taxid
 
-        # Load viral sequences from the Parquet database
+        # Load the reference parquet once. Subsequent lookups are
+        # by tax_id and by accession.
         virus_db_df = pd.read_parquet(params.virus_db)
-        selected_viruses = virus_db_df[virus_db_df["tax_id"].isin(top_tax_ids)]
+        parquet_tax_ids = set(
+            virus_db_df["tax_id"].dropna().astype(int).tolist()
+        )
+        acc_to_tax = parquet_accession_to_taxid(virus_db_df)
 
-        # Write selected viral sequences to FASTA file.
-        # Alongside, emit a chrom -> (tax_id, species_name) sidecar so
-        # reporthanter can label the coverage tabs with the friendly
-        # virus name instead of just the bare accession that bwa keeps
-        # as the @SQ id.
+        # Per-source taxid sets, plus a parallel name map keyed by
+        # tax_id so the eventual sidecar can carry the species name
+        # the classifier originally reported.
+        sources_for_tid: dict[int, set[str]] = {}
+        names_for_tid: dict[int, str] = {}
+        unmapped_rows: list[tuple[int, str, str, str]] = []  # (tid, name, source, reason)
+
+        def _record(tid: int, name: str, source: str) -> None:
+            if tid not in parquet_tax_ids:
+                unmapped_rows.append((tid, name, source, "absent_from_parquet"))
+                return
+            sources_for_tid.setdefault(tid, set()).add(source)
+            # Prefer the first non-empty name we see; classifiers
+            # report the same species under cosmetically different
+            # strings (Kraken: "Alphatorquevirus homin24"; Kaiju:
+            # "Alphatorquevirus 1"). The Kraken name typically reads
+            # the cleanest, hence the first-wins ordering with
+            # KRAKEN processed first.
+            if name and tid not in names_for_tid:
+                names_for_tid[tid] = name
+
+        if "KRAKEN" in params.coverage_sources:
+            kraken_df = pd.read_csv(input.kraken_csv)
+            top_kraken = (
+                kraken_df.loc[kraken_df.domain == "Viruses"]
+                .sort_values("percent", ascending=False)
+                .head(int(params.coverage_top_n))
+            )
+            for r in top_kraken.itertuples():
+                try:
+                    tid = int(r.taxonomy_id)
+                except (ValueError, TypeError):
+                    continue
+                _record(tid, str(getattr(r, "name", "")), "kraken")
+
+        if "KAIJU" in params.coverage_sources:
+            try:
+                kaiju_df = pd.read_csv(input.kaiju_table, sep="\t")
+            except Exception:  # noqa: BLE001
+                kaiju_df = pd.DataFrame()
+            if not kaiju_df.empty and "taxon_id" in kaiju_df.columns:
+                kaiju_df = kaiju_df.dropna(subset=["taxon_id"])
+                kaiju_df = kaiju_df.loc[
+                    kaiju_df["taxon_name"].fillna("") != "unclassified"
+                ]
+                if "percent" in kaiju_df.columns:
+                    kaiju_df = kaiju_df.sort_values("percent", ascending=False)
+                for r in kaiju_df.head(int(params.coverage_top_n)).itertuples():
+                    try:
+                        tid = int(r.taxon_id)
+                    except (ValueError, TypeError):
+                        continue
+                    _record(tid, str(getattr(r, "taxon_name", "")), "kaiju")
+
+        if "BLAST" in params.coverage_sources:
+            for csv in input.blastn_csvs:
+                if not Path(csv).exists() or Path(csv).stat().st_size == 0:
+                    continue
+                try:
+                    blast_df = pd.read_csv(csv)
+                except Exception:  # noqa: BLE001
+                    continue
+                if "accession" not in blast_df.columns:
+                    continue
+                seen_per_csv: set[int] = set()
+                for r in blast_df.itertuples():
+                    accession = getattr(r, "accession", None)
+                    if accession is None or pd.isna(accession):
+                        continue
+                    acc_str = str(accession).strip()
+                    tid = acc_to_tax.get(acc_str) or acc_to_tax.get(
+                        acc_str.split(".")[0]
+                    )
+                    if tid is None:
+                        continue
+                    if tid in seen_per_csv:
+                        continue
+                    seen_per_csv.add(tid)
+                    _record(tid, str(getattr(r, "match_name", "")), "blast")
+
+        # Resolve the parquet rows for every retained tax_id.
+        selected_viruses = virus_db_df[
+            virus_db_df["tax_id"].astype(int).isin(sources_for_tid.keys())
+        ]
+
+        Path(output.virus_fasta).parent.mkdir(parents=True, exist_ok=True)
         with open(output.virus_fasta, "w") as f, open(output.virus_names, "w") as nf:
-            nf.write("chrom\ttax_id\tname\n")
+            nf.write("chrom\ttax_id\tname\tsources\n")
             for row in selected_viruses.itertuples():
                 accession = row.name.strip().split()[0]
                 tid = int(row.tax_id)
-                species = tax_to_name.get(tid, "")
+                species = names_for_tid.get(tid, "")
+                source_tag = ";".join(sorted(sources_for_tid.get(tid, set())))
                 f.write(f">{row.name.strip()}\n{row.sequence}\n")
-                nf.write(f"{accession}\t{tid}\t{species}\n")
+                nf.write(f"{accession}\t{tid}\t{species}\t{source_tag}\n")
+
+        with open(output.unmapped_taxids, "w") as uf:
+            uf.write("tax_id\tname\tsource\treason\n")
+            for tid, name, source, reason in unmapped_rows:
+                # Strip tab/newline from name to keep the TSV well-formed.
+                clean_name = name.replace("\t", " ").replace("\n", " ")
+                uf.write(f"{tid}\t{clean_name}\t{source}\t{reason}\n")
+
+        # If no taxid landed (a smoke-test scenario with empty
+        # classifiers), emit a single dummy reference so BWA still
+        # produces a valid index + BAM and downstream rules do not
+        # crash on an empty FASTA.
+        if Path(output.virus_fasta).stat().st_size == 0:
+            with open(output.virus_fasta, "w") as f:
+                f.write(">DUMMY_REF\n")
+                f.write("N" * 100 + "\n")
 
         # Create BWA index
         index_prefix = params.index_prefix

@@ -117,6 +117,29 @@ properties:
       report is included in the MultiQC aggregate. Off by default;
       enables N50, largest contig, total assembled length and similar
       assembly metrics for batch-level QC triage.
+  COVERAGE_SOURCES:
+    type: array
+    items:
+      type: string
+      enum: ["KRAKEN", "KAIJU", "BLAST"]
+    minItems: 1
+    uniqueItems: true
+    default: ["KRAKEN", "KAIJU", "BLAST"]
+    description: |
+      Which classifiers contribute taxids to the BWA reference set
+      used by mosdepth coverage. Default is the union of all three
+      so the Alignment Coverage panel reflects every classifier's
+      evidence. Set to ["KRAKEN"] to recover the pre-multi-source
+      behaviour (Kraken top-N only).
+  COVERAGE_TOP_N:
+    type: integer
+    minimum: 1
+    default: 20
+    description: |
+      Per-classifier cap on the number of viral hits whose taxids
+      enter the BWA reference set. Applied independently to each
+      classifier listed in COVERAGE_SOURCES; the union of the
+      per-classifier top-Ns drives reference selection.
   ASSEMBLERS:
     type: array
     items:

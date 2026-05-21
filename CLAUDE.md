@@ -58,6 +58,8 @@ on first use.
 | `QUAST` | `"FALSE"` | `quast_megahit` runs against each sample's MEGAHIT contigs and is fed to MultiQC. Bioconda has no `osx-arm64` build of QUAST; on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
 | `GENOMAD` | `"FALSE"` | `genomad` end-to-end runs alongside CheckV; geNomad's per-contig scores are appended as additive columns in `per_virus_metrics.csv`. Requires `GENOMAD_DB`. |
 | `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/...`. Defaults to both assemblers, which intentionally breaks byte-identical parity with the original `virusHanter` (see `docs/PARITY_NOTES.md`). Set `["MEGAHIT"]` to recover parity. |
+| `COVERAGE_SOURCES` | `["KRAKEN", "KAIJU", "BLAST"]` | Classifiers whose viral hits contribute taxids to the BWA reference set used by mosdepth coverage. The union of the top-N from each enabled source drives reference selection; an `unmapped_taxids.tsv` sidecar lists classified taxids missing from `VIRUS_PARQUET`. Set `["KRAKEN"]` to recover the pre-multi-source behaviour. |
+| `COVERAGE_TOP_N` | `20` | Per-classifier cap on the number of viral hits whose taxids enter the BWA reference set. Applied independently to each entry in `COVERAGE_SOURCES`. |
 | `COVERAGE_WINDOW` | `100` | Window size (bp) for `mosdepth --by`. Drives coverage-trace resolution in the HTML report. |
 
 Every opt-in is parity-safe by default. When you flip one on, verify

@@ -133,6 +133,24 @@ if _invalid:
         + ", ".join(sorted(_VALID_ASSEMBLERS))
     )
 
+# Classifier sources that contribute taxids to the BWA reference
+# set used by mosdepth coverage. Union of the three by default;
+# set COVERAGE_SOURCES: ["KRAKEN"] in config to recover the
+# pre-multi-source behaviour.
+COVERAGE_SOURCES = list(
+    config.get("COVERAGE_SOURCES", ["KRAKEN", "KAIJU", "BLAST"])
+)
+_VALID_COVERAGE_SOURCES = {"KRAKEN", "KAIJU", "BLAST"}
+_invalid_sources = [s for s in COVERAGE_SOURCES if s not in _VALID_COVERAGE_SOURCES]
+if _invalid_sources:
+    raise WorkflowError(
+        "Unknown coverage source(s) in config[COVERAGE_SOURCES]: "
+        + ", ".join(_invalid_sources)
+        + ". Valid choices are: "
+        + ", ".join(sorted(_VALID_COVERAGE_SOURCES))
+    )
+COVERAGE_TOP_N = int(config.get("COVERAGE_TOP_N", 20))
+
 # Include rule files
 include: "rules/pre_processing.smk"
 include: "rules/classification.smk"

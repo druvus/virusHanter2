@@ -18,6 +18,36 @@ import pandas as pd
 import pyfastx
 
 
+def parquet_accession_to_taxid(parquet_df: pd.DataFrame) -> dict[str, int]:
+    """Bucket VIRUS_PARQUET rows into a base-accession -> tax_id map.
+
+    The parquet's ``name`` column carries the original FASTA header
+    (e.g. ``NC_007605.1 Human gammaherpesvirus 4 ...``); BLAST hits
+    surface either the versioned (``NC_007605.1``) or unversioned
+    (``NC_007605``) accession depending on the BLAST output format.
+    Index both so a downstream lookup always lands the same tax_id
+    regardless of which form the caller has.
+
+    Skips rows with ``tax_id == 0`` (the build_virus_parquet sentinel
+    for accessions that the accession2taxid mapping could not resolve)
+    so they do not contaminate the lookup.
+    """
+    out: dict[str, int] = {}
+    if "name" not in parquet_df.columns or "tax_id" not in parquet_df.columns:
+        return out
+    for row in parquet_df.itertuples():
+        try:
+            tid = int(row.tax_id)
+        except (ValueError, TypeError):
+            continue
+        if tid == 0:
+            continue
+        first_token = str(row.name).split()[0]
+        out[first_token] = tid
+        out[first_token.split(".")[0]] = tid
+    return out
+
+
 def read_file_as_blob(file_path: str) -> str:
     """Return the file content as a lowercase hex string.
 

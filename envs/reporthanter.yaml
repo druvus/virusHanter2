@@ -14,4 +14,4 @@ dependencies:
       # Pin to a released tag rather than @main so the same pipeline
       # invocation on different days uses the same reportHanter code.
       # Bump this tag when intentionally rolling forward.
-      - git+https://github.com/druvus/reporthanter.git@v0.5.0
+      - git+https://github.com/druvus/reporthanter.git@v0.5.1
