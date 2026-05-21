@@ -13,13 +13,50 @@ from pathlib import Path
 
 import pandas as pd
 
+import reporthanter
 from reporthanter import FlagstatProcessor
 
 # Pull in the pipeline-side helper for hex-encoding the HTML blob.
 from scripts.functions import read_file_as_blob
 
 
-def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
+# Config keys whose values name a reference database the workflow
+# consumed. Captured in the run-info CSV under `databases_used` so
+# diagnostic provenance survives a future DB refresh.
+_DB_CONFIG_KEYS = (
+    "HUMAN_INDEX",
+    "KAIJU_DB",
+    "KRAKEN_DB",
+    "BLASTN_DB",
+    "CHECKV_DB",
+    "VIRUS_PARQUET",
+    "GENOMAD_DB",
+    "SECONDARY_HOST_INDEX",
+)
+
+
+def _databases_used_string(cfg: dict) -> str:
+    """Render the DB paths the workflow used as a single semicolon-
+    delimited ``KEY=VALUE`` string, suitable for a CSV cell.
+
+    Empty / unset keys are dropped so the cell stays compact when
+    optional databases (geNomad, secondary host) are not configured.
+    """
+    parts: list[str] = []
+    for key in _DB_CONFIG_KEYS:
+        value = cfg.get(key, "")
+        if not value:
+            continue
+        parts.append(f"{key}={value}")
+    return ";".join(parts)
+
+
+def aggregate_sample_info(
+    sample_folder: Path,
+    *,
+    databases_used: str = "",
+    reporthanter_version: str = "",
+) -> pd.DataFrame:
     sample_folder = sample_folder.resolve()
     sample_name = sample_folder.name
     run_name = sample_folder.parts[-2]
@@ -116,6 +153,30 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
     else:
         top_contigs_blastn = ""
 
+    # Optional geNomad summary. Only present when the workflow ran
+    # with GENOMAD: "TRUE". Adds two additive columns at the trailing
+    # end of the run-info CSV: the count of contigs geNomad called
+    # viral and the highest virus_score among them.
+    genomad_viral_contigs: int | str = ""
+    genomad_max_virus_score: float | str = ""
+    genomad_path = (
+        sample_folder
+        / "GENOMAD"
+        / f"{sample_name}_summary"
+        / f"{sample_name}_virus_summary.tsv"
+    )
+    if genomad_path.exists() and genomad_path.stat().st_size > 0:
+        try:
+            gdf = pd.read_csv(genomad_path, sep="\t")
+            if "virus_score" in gdf.columns:
+                genomad_viral_contigs = int(len(gdf))
+                if len(gdf):
+                    genomad_max_virus_score = float(gdf["virus_score"].max())
+        except Exception:  # noqa: BLE001
+            # Leave the columns blank if the TSV is malformed; the
+            # rest of the run-info row should still land.
+            pass
+
     return pd.DataFrame([{
         "run_name": run_name,
         "sample_name": sample_name,
@@ -136,6 +197,19 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
         # column-dropped diff against an older run should still be clean.
         "duplicate_pairs": duplicate_pairs,
         "duplicate_rate_percent": duplicate_rate_percent,
+        # Trailing columns added 2026-05-21 (geNomad surface). Only
+        # populated when GENOMAD: "TRUE"; otherwise empty so a
+        # column-dropped diff against pre-geNomad runs is clean.
+        "genomad_viral_contigs": genomad_viral_contigs,
+        "genomad_max_virus_score": genomad_max_virus_score,
+        # Trailing diagnostic-provenance columns. `databases_used`
+        # records the reference DB paths the workflow consumed (one
+        # KEY=VALUE per DB, semicolon-separated). `reporthanter_version`
+        # captures the version that rendered the per-sample HTML
+        # blobs. Both columns are constant within a batch but vary
+        # across batches and across DB / reporthanter refreshes.
+        "databases_used": databases_used,
+        "reporthanter_version": reporthanter_version,
     }])
 
 
@@ -145,7 +219,17 @@ def main() -> None:
     results_folder = Path(sm.params.results_folder)
     samples = [Path(report).parent.parent.name for report in sm.input.reports]
 
-    rows = [aggregate_sample_info(results_folder / sample) for sample in samples]
+    databases_used = _databases_used_string(dict(sm.config))
+    reporthanter_version = getattr(reporthanter, "__version__", "")
+
+    rows = [
+        aggregate_sample_info(
+            results_folder / sample,
+            databases_used=databases_used,
+            reporthanter_version=reporthanter_version,
+        )
+        for sample in samples
+    ]
     run_info_df = pd.concat(rows, ignore_index=True)
     run_info_df.to_csv(sm.output.run_info_csv, index=False)
 

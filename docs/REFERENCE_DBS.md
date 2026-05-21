@@ -18,6 +18,32 @@ production config at
 | `all_viruses.parquet` | `INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet` | `bwa_align_to_kraken_hits`, `per_virus_metrics` | rebuild after FASTA refresh |
 | geNomad DB (optional) | `GENOMAD_DB/genomad_db/` | `genomad` (only when `GENOMAD: "TRUE"`) | when geNomad releases a new DB |
 
+## Kaiju database choice
+
+There are two Kaiju databases under `KAIJU_DB/`:
+
+- **`refseq/`** (~21 GB FMI). Built from the full NCBI RefSeq protein
+  set. Recommended for any clinical workload. Loads entirely into
+  memory at start-up, so a host with **at least 24-32 GB of RAM** is
+  required; on a 16-18 GB laptop the index pages to swap and the
+  classify step takes hours per sample (or OOM-kills).
+- **`viruses/`** (~318 MB FMI). Built from RefSeq complete viral
+  genomes only. Fits on a laptop, but content gaps make it
+  unsuitable for clinical work as-is: a 2026-05-21 check found
+  **0 Anelloviridae proteins** (Torque teno virus and relatives) and
+  only **1 Pegiviridae protein** (GB virus C and relatives). Real
+  MiSeq batches dominated by those families report
+  `kaiju_virus_percent = 0` regardless of how much signal Kraken2
+  finds. The DB also lacks `nodes.dmp` / `names.dmp` next to the
+  FMI; symlink them in from the parent `KAIJU_DB/` directory before
+  running.
+
+Operational rule of thumb: production runs on Linux use `refseq`;
+laptop dev and the smoke fixture use `viruses` and accept the blank
+Kaiju panel as expected. The `KAIJU_DB` config key carries the
+chosen DB path; document the choice in the run-info CSV via the
+`databases_used` column (added 2026-05-21).
+
 ## CheckV on a Mac-mounted external volume
 
 If the CheckV DB is hosted on an external drive that has ever been

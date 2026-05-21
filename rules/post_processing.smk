@@ -136,6 +136,13 @@ rule generate_report:
             if config.get("QUAST", "FALSE") == "TRUE"
             else {}
         ),
+        # When geNomad is enabled, surface its per-sample virus
+        # summary as a Classification of Contigs sub-tab.
+        **(
+            {"genomad_summary": rules.genomad.output.summary}
+            if config.get("GENOMAD", "FALSE") == "TRUE"
+            else {}
+        ),
     output:
         report_html=f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html",
     conda:
@@ -162,6 +169,13 @@ rule generate_report:
                 else ""
             )
         ),
+        genomad_args=(
+            lambda wildcards, input: (
+                f"--genomad_summary {input.genomad_summary}"
+                if hasattr(input, "genomad_summary")
+                else ""
+            )
+        ),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
     shell:
@@ -175,6 +189,7 @@ rule generate_report:
             --mosdepth_regions {input.mosdepth_regions} \
             --virus_names {input.virus_names} \
             {params.quast_args} \
+            {params.genomad_args} \
             --output {output.report_html} \
             --sample_name {params.display_name} \
             {params.secondary_args} \

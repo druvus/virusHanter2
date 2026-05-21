@@ -13,6 +13,9 @@ THREADS: 8
 CLEAN: "FALSE"
 
 HUMAN_INDEX:   "/Volumes/LaCie/REGIONEN/ref_dbs/BWA_GENCODE_GRCH38/human_gencode"
+# Kaiju: use `refseq` for clinical work (covers Anelloviridae,
+# Pegiviridae, etc.); the smaller `viruses` DB is laptop-friendly
+# but misses common clinical families. See docs/REFERENCE_DBS.md.
 KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/KAIJU_DB/refseq"
 KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/pluspf"
 # BLASTN_DB is the prefix of the .nal alias file; the run_blastn helper
