@@ -76,6 +76,19 @@ properties:
     type: string
     enum: ["TRUE", "FALSE"]
     default: "FALSE"
+  GENOMAD_SPLITS:
+    type: integer
+    minimum: 0
+    default: 4
+    description: |
+      Number of splits passed to ``genomad --splits``. Higher values
+      reduce peak memory for the embedded ``mmseqs prefilter`` step
+      at the cost of run time. Default 4 keeps the peak memory under
+      ~6 GB on a typical viral-metagenomics sample and prevents the
+      OOM SIGKILL that fires on Apple Silicon laptops when geNomad
+      processes metaSPAdes contigs (which produce ~3x more proteins
+      than MEGAHIT). Set to 0 on Linux machines with abundant RAM
+      to restore mmseqs2's auto-split behaviour.
   GENOMAD_DB:
     type: string
     description: |

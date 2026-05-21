@@ -453,10 +453,30 @@ rule genomad:
     input:
         contigs=rules.pilon.output.improved_contigs,
     output:
-        summary=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+        # geNomad names every output directory and file after the
+        # input FASTA's stem, not after the sample name. Pilon's
+        # improved-contigs output is `<sample>_improved_contigs.fasta`,
+        # so geNomad writes to `<sample>_improved_contigs_summary/`.
+        # Declaring the rule output to match the actual file avoids
+        # the silent "Missing output files" failure that would
+        # otherwise fire after geNomad finished successfully.
+        summary=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_improved_contigs_summary/{{sample}}_improved_contigs_virus_summary.tsv",
     params:
         db=GENOMAD_DB,
         out_dir=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD",
+        # geNomad's `annotate` step calls `mmseqs prefilter` which
+        # allocates large amounts of memory in proportion to the
+        # query proteome size. metaSPAdes typically produces ~3x
+        # more contigs than MEGAHIT, which on a memory-tight host
+        # (e.g. an 18 GB laptop) is enough to trigger an OOM SIGKILL.
+        # `--splits N` is geNomad's documented memory mitigation:
+        # the mmseqs search is partitioned into N chunks and each
+        # chunk's peak memory shrinks roughly linearly. Default to
+        # 4 splits, which keeps the peak under ~6 GB on the DRRKK
+        # samples and still completes in reasonable time. Set to 0
+        # in config[GENOMAD_SPLITS] to restore mmseqs' auto-split
+        # behaviour on Linux machines with abundant RAM.
+        splits=int(config.get("GENOMAD_SPLITS", 4)),
     threads: THREADS
     resources:
         mem_mb=16000,
@@ -470,6 +490,7 @@ rule genomad:
         mkdir -p {params.out_dir}
         genomad end-to-end \
             --threads {threads} \
+            --splits {params.splits} \
             --cleanup \
             {input.contigs} \
             {params.out_dir} \

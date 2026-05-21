@@ -215,7 +215,7 @@ rule all:
         # `{sample}/{assembler}/GENOMAD/`.
         (
             expand(
-                f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_summary/{{sample}}_virus_summary.tsv",
+                f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/GENOMAD/{{sample}}_improved_contigs_summary/{{sample}}_improved_contigs_virus_summary.tsv",
                 sample=SAMPLES,
                 assembler=ASSEMBLERS,
             )

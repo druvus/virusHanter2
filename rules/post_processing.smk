@@ -343,7 +343,7 @@ rule generate_report:
         **(
             {
                 "genomad_summaries": expand(
-                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_summary/{{{{sample}}}}_virus_summary.tsv",
+                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_improved_contigs_summary/{{{{sample}}}}_improved_contigs_virus_summary.tsv",
                     assembler=ASSEMBLERS,
                 )
             }
@@ -429,7 +429,7 @@ rule per_virus_metrics:
         **(
             {
                 "genomad_summaries": expand(
-                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_summary/{{{{sample}}}}_virus_summary.tsv",
+                    f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/GENOMAD/{{{{sample}}}}_improved_contigs_summary/{{{{sample}}}}_improved_contigs_virus_summary.tsv",
                     assembler=ASSEMBLERS,
                 )
             }
