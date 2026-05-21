@@ -109,7 +109,15 @@ could not resolve) are dropped in this mode.
 
 `build_stats.json` records the source, build date, input record
 count, post-dedup row count, unique taxid count and basic length
-statistics.
+statistics. When the refresh workflow's `download_taxdump` /
+`decompress_taxdump` rules have populated a `nodes.dmp`, the
+builder enriches every row with two extra columns (`rank`,
+`genus_taxid`) and records a `rank_distribution` dict plus a
+`with_genus_taxid_count` in `build_stats.json`. The runtime
+pipeline's `TAXDUMP_NODES` config key should point at the
+`nodes.dmp` that `publish_taxdump_nodes` writes next to the
+parquet, so the coverage rule can apply the rank filter and the
+genus walk-up without re-extracting the tarball.
 
 Pre-2026-05-21 builds used viral RefSeq alone. Reproduce that with:
 

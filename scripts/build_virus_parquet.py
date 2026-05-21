@@ -69,6 +69,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="NCBI accession2taxid.gz (e.g. nucl_gb.accession2taxid.gz).",
     )
+    p.add_argument(
+        "--taxdump-nodes",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to an uncompressed NCBI ``nodes.dmp`` from "
+            "``taxdump.tar.gz``. When supplied, the parquet is enriched "
+            "with `rank` and `genus_taxid` columns so the runtime "
+            "coverage rule can apply a rank filter and a genus walk-up. "
+            "When omitted, the parquet keeps the three-column "
+            "(name, sequence, tax_id) shape and downstream rules behave "
+            "as today."
+        ),
+    )
     p.add_argument("--out", required=True, type=Path, help="Output parquet path.")
     p.add_argument(
         "--source",
@@ -188,6 +202,97 @@ def load_taxid_map_subset(path: Path, wanted: set[str]) -> dict[str, int]:
     return out
 
 
+def parse_nodes_dmp(path: Path) -> dict[int, tuple[int, str]]:
+    """Parse NCBI ``nodes.dmp`` into ``{tax_id: (parent_tax_id, rank)}``.
+
+    The NCBI ``.dmp`` files use ``\\t|\\t`` as the inter-field
+    delimiter and ``\\t|`` at the end of each row. nodes.dmp's first
+    three fields are ``tax_id``, ``parent_tax_id``, ``rank``; everything
+    after column 3 is ignored. The full file is small (~12 MB
+    uncompressed, ~2.6M nodes) and parses in a few seconds.
+    """
+    out: dict[int, tuple[int, str]] = {}
+    if not Path(path).exists():
+        return out
+    with open(path) as fh:
+        for line in fh:
+            # Strip the trailing "\t|\n" if present and split on "\t|\t".
+            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
+            parts = stripped.split("\t|\t")
+            if len(parts) < 3:
+                continue
+            try:
+                tid = int(parts[0].strip())
+                parent = int(parts[1].strip())
+            except ValueError:
+                continue
+            rank = parts[2].strip()
+            out[tid] = (parent, rank)
+    return out
+
+
+def find_genus_taxid(
+    tid: int,
+    nodes: dict[int, tuple[int, str]],
+    *,
+    depth_limit: int = 20,
+) -> int:
+    """Walk the parent chain from ``tid`` upward and return the first
+    ancestor whose rank is ``genus``. Returns ``0`` if no genus is
+    found within ``depth_limit`` steps or if the chain breaks (a
+    tax_id is missing from the nodes map).
+
+    The depth limit protects against retired-taxid cycles that
+    occasionally show up in NCBI dumps. The chain also stops once
+    it reaches the root (``parent == tid`` for the synthetic root
+    node 1) so the loop is always bounded.
+    """
+    if tid <= 0 or not nodes:
+        return 0
+    seen: set[int] = set()
+    current = tid
+    for _ in range(depth_limit):
+        if current in seen:
+            return 0
+        seen.add(current)
+        node = nodes.get(current)
+        if node is None:
+            return 0
+        parent, rank = node
+        if rank == "genus":
+            return current
+        if parent == current:
+            return 0
+        current = parent
+    return 0
+
+
+def enrich_with_taxdump(
+    df: pd.DataFrame, nodes: dict[int, tuple[int, str]]
+) -> pd.DataFrame:
+    """Return ``df`` with two extra columns: ``rank`` and ``genus_taxid``.
+
+    Both columns are derived from ``nodes`` (parsed from NCBI
+    ``nodes.dmp``). Rows whose tax_id is missing from ``nodes`` get
+    ``rank = 'unknown'`` and ``genus_taxid = 0``. Original column
+    order is preserved with the new columns appended.
+    """
+    if df.empty:
+        return df.assign(rank="unknown", genus_taxid=0)
+    rank_col: list[str] = []
+    genus_col: list[int] = []
+    for tid in df["tax_id"].astype(int).tolist():
+        node = nodes.get(tid)
+        rank_col.append(node[1] if node else "unknown")
+        # If the row itself is already at rank 'genus', use its own
+        # tax_id rather than walking further up.
+        if node and node[1] == "genus":
+            genus_col.append(tid)
+        else:
+            genus_col.append(find_genus_taxid(tid, nodes))
+    return df.assign(rank=rank_col, genus_taxid=genus_col)
+
+
 def pick_longest_per_taxid(df: pd.DataFrame) -> pd.DataFrame:
     """Keep one row per `tax_id` — the longest sequence.
 
@@ -220,6 +325,7 @@ def build(
     taxid_path: Path | None,
     *,
     one_rep_per_taxid: bool,
+    taxdump_nodes_path: Path | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Construct the parquet DataFrame and the build_stats dict."""
     rows = fasta_records(fastas)
@@ -259,6 +365,21 @@ def build(
     else:
         df = raw
 
+    rank_distribution: dict[str, int] = {}
+    with_genus_taxid_count = 0
+    if taxdump_nodes_path is not None:
+        logging.info("Parsing taxdump nodes: %s", taxdump_nodes_path)
+        nodes = parse_nodes_dmp(taxdump_nodes_path)
+        logging.info("Parsed %d taxdump nodes", len(nodes))
+        df = enrich_with_taxdump(df, nodes)
+        rank_distribution = (
+            df["rank"].value_counts().to_dict() if not df.empty else {}
+        )
+        # Cast counts to int — value_counts returns numpy.int64 which
+        # json.dump cannot serialise.
+        rank_distribution = {str(k): int(v) for k, v in rank_distribution.items()}
+        with_genus_taxid_count = int((df["genus_taxid"] != 0).sum())
+
     stats = {
         "input_records": int(len(raw)),
         "output_records": int(len(df)),
@@ -267,6 +388,9 @@ def build(
         "mean_sequence_length": float(df["sequence"].str.len().mean()) if len(df) else 0.0,
         "median_sequence_length": float(df["sequence"].str.len().median()) if len(df) else 0.0,
         "one_rep_per_taxid": bool(one_rep_per_taxid),
+        "taxdump_enriched": bool(taxdump_nodes_path is not None),
+        "rank_distribution": rank_distribution,
+        "with_genus_taxid_count": with_genus_taxid_count,
     }
     return df, stats
 
@@ -279,7 +403,10 @@ def main() -> None:
     )
 
     df, stats = build(
-        args.fasta, args.taxid, one_rep_per_taxid=args.one_rep_per_taxid
+        args.fasta,
+        args.taxid,
+        one_rep_per_taxid=args.one_rep_per_taxid,
+        taxdump_nodes_path=args.taxdump_nodes,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(args.out, index=False)

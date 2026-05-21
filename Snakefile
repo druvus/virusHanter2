@@ -54,6 +54,8 @@ def _check_db_paths_exist(cfg: dict) -> None:
                 f"  {key}: {path}  (parent directory missing)"
             )
 
+    if cfg.get("TAXDUMP_NODES"):
+        check_file("TAXDUMP_NODES")
     check_prefix("HUMAN_INDEX")
     check_dir("KAIJU_DB")
     check_dir("KRAKEN_DB")
@@ -150,6 +152,30 @@ if _invalid_sources:
         + ", ".join(sorted(_VALID_COVERAGE_SOURCES))
     )
 COVERAGE_TOP_N = int(config.get("COVERAGE_TOP_N", 20))
+
+# Optional taxdump-driven rank filter and genus walk-up. Both are
+# silent no-ops when TAXDUMP_NODES is empty; the rule still runs
+# with the bare multi-source union behaviour.
+TAXDUMP_NODES = config.get("TAXDUMP_NODES", "") or ""
+COVERAGE_RANK_FILTER = list(
+    config.get(
+        "COVERAGE_RANK_FILTER",
+        [
+            "realm",
+            "kingdom",
+            "subkingdom",
+            "phylum",
+            "subphylum",
+            "class",
+            "subclass",
+            "order",
+            "suborder",
+            "family",
+            "subfamily",
+        ],
+    )
+)
+COVERAGE_GENUS_WALKUP = config.get("COVERAGE_GENUS_WALKUP", "TRUE") == "TRUE"
 
 # Include rule files
 include: "rules/pre_processing.smk"

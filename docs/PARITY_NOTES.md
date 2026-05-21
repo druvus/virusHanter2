@@ -212,6 +212,57 @@ Production Linux runs are unaffected — both `_popcnt` and
 flag is gated on the platform check, so it imposes no
 assembly-quality concession on Linux.
 
+## 2026-05-21: Rank filter + genus walk-up on the coverage reference set
+
+`bwa_align_to_kraken_hits` now consults an NCBI taxdump
+(`nodes.dmp`) when `TAXDUMP_NODES` is configured. Two new
+behaviours are gated on the taxdump:
+
+1. **Rank filter** (`COVERAGE_RANK_FILTER`, default
+   `[realm, kingdom, subkingdom, phylum, subphylum, class,
+   subclass, order, suborder, family, subfamily]`). Classifier
+   hits at these higher ranks are dropped silently before they
+   enter the coverage union. Without the filter, NCBI taxonomy
+   propagation rows like `Viruses` (kingdom), `Cardeaviricetes`
+   (class), `Anelloviridae` (family) and `Herpesvirales` (order)
+   flood `unmapped_taxids.tsv` because no per-taxid sequence
+   exists for ranks above genus.
+
+2. **Genus walk-up** (`COVERAGE_GENUS_WALKUP`, default `TRUE`).
+   When a species/strain taxid is absent from `VIRUS_PARQUET`
+   the rule walks its parent chain via `nodes.dmp` to the first
+   ancestor at rank `genus`. If a parquet reference exists for
+   that genus the rule substitutes it and tags the source in
+   `virus_names` with `->genus` (e.g. `kraken->genus`). Two
+   strain-level Kraken hits that share a genus collapse to a
+   single genus reference, which is the desired behaviour: the
+   coverage panel surfaces "any Alphatorquevirus" coverage even
+   when the specific strains the classifier called are not in
+   the parquet.
+
+This is a **deliberate parity break**:
+
+- The `virus_names` sidecar's `sources` column can now carry
+  `->genus`-suffixed tags. Older sidecars that pre-date this
+  change still render because the suffix is only an additional
+  string value.
+- The mosdepth chrom set may include genus-level references
+  that were never in classifier output directly. Coverage tab
+  labels like `NC_038338.1 — Alphatorquevirus [kraken->genus]`
+  signal the substitution.
+
+To recover today's behaviour, set `COVERAGE_RANK_FILTER: []`
+and `COVERAGE_GENUS_WALKUP: "FALSE"`, or leave `TAXDUMP_NODES`
+empty (the rule then logs a single warning and degrades to the
+multi-source union without rank filter or walk-up).
+
+The build-time parquet rebuild now writes two extra columns
+(`rank`, `genus_taxid`) when the refresh workflow points at a
+`nodes.dmp`. The columns are purely additive — every existing
+consumer (`parquet_accession_to_taxid`,
+`parquet_refs_by_taxid`, `pick_longest_per_taxid`) accesses the
+DataFrame by column name and ignores extras.
+
 ## 2026-05-21: Multi-source coverage reference set
 
 `bwa_align_to_kraken_hits` previously picked the Kraken2 top-20

@@ -55,6 +55,9 @@ rule bwa_align_to_kraken_hits:
         index_prefix=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/bwa/{{sample}}",
         coverage_sources=COVERAGE_SOURCES,
         coverage_top_n=COVERAGE_TOP_N,
+        taxdump_nodes=TAXDUMP_NODES,
+        coverage_rank_filter=COVERAGE_RANK_FILTER,
+        coverage_genus_walkup=COVERAGE_GENUS_WALKUP,
     threads: THREADS
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_kraken.log"
@@ -65,6 +68,10 @@ rule bwa_align_to_kraken_hits:
         from pathlib import Path
 
         from scripts.functions import parquet_accession_to_taxid
+        from scripts.build_virus_parquet import (
+            find_genus_taxid,
+            parse_nodes_dmp,
+        )
 
         # Load the reference parquet once. Subsequent lookups are
         # by tax_id and by accession.
@@ -74,6 +81,22 @@ rule bwa_align_to_kraken_hits:
         )
         acc_to_tax = parquet_accession_to_taxid(virus_db_df)
 
+        # Optional taxdump-driven rank lookup. When TAXDUMP_NODES is
+        # empty or the file is missing, the rank filter and walk-up
+        # both degrade to no-ops; the rule still produces the bare
+        # multi-source union as before.
+        rank_filter: set[str] = set(params.coverage_rank_filter or [])
+        taxdump_path = params.taxdump_nodes
+        nodes: dict[int, tuple[int, str]] = {}
+        if taxdump_path and Path(taxdump_path).is_file():
+            nodes = parse_nodes_dmp(Path(taxdump_path))
+        elif rank_filter or params.coverage_genus_walkup:
+            print(
+                "[bwa_align_to_kraken_hits] TAXDUMP_NODES not set or missing; "
+                "rank filter and genus walk-up are disabled."
+            )
+            rank_filter = set()
+
         # Per-source taxid sets, plus a parallel name map keyed by
         # tax_id so the eventual sidecar can carry the species name
         # the classifier originally reported.
@@ -82,18 +105,35 @@ rule bwa_align_to_kraken_hits:
         unmapped_rows: list[tuple[int, str, str, str]] = []  # (tid, name, source, reason)
 
         def _record(tid: int, name: str, source: str) -> None:
-            if tid not in parquet_tax_ids:
-                unmapped_rows.append((tid, name, source, "absent_from_parquet"))
+            rank = nodes.get(tid, (0, "unknown"))[1] if nodes else "unknown"
+            # Higher-rank propagation rows (kingdom, phylum, class,
+            # order, family) are dropped silently — they have no
+            # per-taxid reference and would otherwise flood the
+            # unmapped sidecar.
+            if rank in rank_filter:
                 return
-            sources_for_tid.setdefault(tid, set()).add(source)
-            # Prefer the first non-empty name we see; classifiers
-            # report the same species under cosmetically different
-            # strings (Kraken: "Alphatorquevirus homin24"; Kaiju:
-            # "Alphatorquevirus 1"). The Kraken name typically reads
-            # the cleanest, hence the first-wins ordering with
-            # KRAKEN processed first.
-            if name and tid not in names_for_tid:
-                names_for_tid[tid] = name
+            if tid in parquet_tax_ids:
+                sources_for_tid.setdefault(tid, set()).add(source)
+                # Prefer the first non-empty name we see; classifiers
+                # report the same species under cosmetically different
+                # strings. KRAKEN is processed first so its naming wins.
+                if name and tid not in names_for_tid:
+                    names_for_tid[tid] = name
+                return
+            # Walk up to the genus and substitute a representative
+            # genus reference when one exists in the parquet. The
+            # source tag carries the ``->genus`` suffix so the
+            # reviewer sees the fallback in the coverage tab label.
+            if params.coverage_genus_walkup and nodes:
+                genus_tid = find_genus_taxid(tid, nodes)
+                if genus_tid and genus_tid in parquet_tax_ids:
+                    sources_for_tid.setdefault(genus_tid, set()).add(
+                        f"{source}->genus"
+                    )
+                    if name and genus_tid not in names_for_tid:
+                        names_for_tid[genus_tid] = name
+                    return
+            unmapped_rows.append((tid, name, source, "absent_from_parquet"))
 
         if "KRAKEN" in params.coverage_sources:
             kraken_df = pd.read_csv(input.kraken_csv)

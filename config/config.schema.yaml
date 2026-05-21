@@ -117,6 +117,50 @@ properties:
       report is included in the MultiQC aggregate. Off by default;
       enables N50, largest contig, total assembled length and similar
       assembly metrics for batch-level QC triage.
+  TAXDUMP_NODES:
+    type: string
+    default: ""
+    description: |
+      Optional path to the uncompressed NCBI ``nodes.dmp`` (extracted
+      from ``taxdump.tar.gz``). When supplied, ``bwa_align_to_kraken_hits``
+      applies the rank filter listed in COVERAGE_RANK_FILTER and (if
+      COVERAGE_GENUS_WALKUP is on) walks missing taxids up to their
+      genus before declaring them unmapped. Refresh alongside the
+      parquet via ``refresh/refresh_virus_parquet.smk``.
+  COVERAGE_RANK_FILTER:
+    type: array
+    items:
+      type: string
+    default:
+      - "realm"
+      - "kingdom"
+      - "subkingdom"
+      - "phylum"
+      - "subphylum"
+      - "class"
+      - "subclass"
+      - "order"
+      - "suborder"
+      - "family"
+      - "subfamily"
+    description: |
+      NCBI rank strings that classifier hits are dropped at before
+      they enter the BWA reference union. Higher-rank propagation
+      rows (Viruses, Cardeaviricetes, Anelloviridae, ...) have no
+      per-taxid sequence and are pure noise in the unmapped sidecar
+      when classifiers report them alongside their species/strain
+      descendants. Requires TAXDUMP_NODES to be populated; set to
+      ``[]`` to disable.
+  COVERAGE_GENUS_WALKUP:
+    type: string
+    enum: ["TRUE", "FALSE"]
+    default: "TRUE"
+    description: |
+      When ``TRUE``, classifier hits whose tax_id is absent from
+      VIRUS_PARQUET are walked up to their genus via the taxdump
+      and a representative genus reference is substituted. The
+      virus_names sidecar tags the substitution in its sources
+      column (e.g. ``kraken->genus``). Requires TAXDUMP_NODES.
   COVERAGE_SOURCES:
     type: array
     items:
