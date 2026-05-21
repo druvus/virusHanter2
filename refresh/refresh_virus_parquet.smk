@@ -216,6 +216,21 @@ rule decompress_viral_proteins:
 
 
 rule download_accession2taxid:
+    """Download nucleotide accession2taxid.
+
+    Uses curl rather than wget because wget on a macOS-mounted
+    external volume emits a non-fatal ``utime()`` warning that
+    nevertheless leaves wget with a non-zero exit code on some
+    builds. The cd-and-md5sum verification step then fails because
+    Snakemake's set -e aborts the shell block before md5sum runs,
+    and Snakemake's failure handler removes the (otherwise valid)
+    downloaded file. curl writes directly to the target path
+    without calling utime(), so the chain is robust on LaCie.
+
+    Integrity check still runs after download; if the .md5
+    verification fails we surface that as the failure rather than
+    silently keeping a partial file.
+    """
     output:
         gz=str(TAXID_GZ),
         md5=str(TAXID_MD5),
@@ -229,12 +244,10 @@ rule download_accession2taxid:
     shell:
         """
         mkdir -p $(dirname {output.gz})
-        wget --no-verbose -O {output.gz} {params.url} 2> {log}
-        wget --no-verbose -O {output.md5} {params.md5_url} 2>> {log}
-        # Verify checksum. The .md5 file lists the file as it sits on
-        # the NCBI FTP, so md5sum -c only works if the downloaded file
-        # has the same basename. cd into the download dir to make that
-        # work without rewriting the .md5.
+        curl --silent --show-error --fail --location \
+            --output {output.gz} {params.url} 2> {log}
+        curl --silent --show-error --fail --location \
+            --output {output.md5} {params.md5_url} 2>> {log}
         ( cd $(dirname {output.gz}) && md5sum -c $(basename {output.md5}) ) >> {log} 2>&1
         """
 
@@ -242,7 +255,11 @@ rule download_accession2taxid:
 rule download_prot_accession2taxid:
     """Protein-accession-to-taxid mapping. Drives the header
     rewrite step that prepares the RefSeq viral protein FASTA for
-    Kaiju's BWT builder."""
+    Kaiju's BWT builder.
+
+    Uses curl for the same LaCie-on-macOS reason as
+    ``download_accession2taxid``.
+    """
     output:
         gz=str(PROT_TAXID_GZ),
         md5=str(PROT_TAXID_MD5),
@@ -256,8 +273,10 @@ rule download_prot_accession2taxid:
     shell:
         """
         mkdir -p $(dirname {output.gz})
-        wget --no-verbose -O {output.gz} {params.url} 2> {log}
-        wget --no-verbose -O {output.md5} {params.md5_url} 2>> {log}
+        curl --silent --show-error --fail --location \
+            --output {output.gz} {params.url} 2> {log}
+        curl --silent --show-error --fail --location \
+            --output {output.md5} {params.md5_url} 2>> {log}
         ( cd $(dirname {output.gz}) && md5sum -c $(basename {output.md5}) ) >> {log} 2>&1
         """
 
@@ -276,8 +295,10 @@ rule download_taxdump:
     shell:
         """
         mkdir -p $(dirname {output.tar})
-        wget --no-verbose -O {output.tar} {params.url} 2> {log}
-        wget --no-verbose -O {output.md5} {params.md5_url} 2>> {log}
+        curl --silent --show-error --fail --location \
+            --output {output.tar} {params.url} 2> {log}
+        curl --silent --show-error --fail --location \
+            --output {output.md5} {params.md5_url} 2>> {log}
         ( cd $(dirname {output.tar}) && md5sum -c $(basename {output.md5}) ) >> {log} 2>&1
         """
 

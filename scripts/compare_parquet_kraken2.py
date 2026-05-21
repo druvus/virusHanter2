@@ -56,9 +56,15 @@ def parse_kraken_inspect(text: str) -> dict[int, str]:
 
 
 def run_kraken_inspect(kraken_db: Path) -> str:
-    """Invoke ``kraken2-inspect`` and return its stdout."""
+    """Invoke ``kraken2-inspect`` and return its stdout.
+
+    Note: ``--skip-counts`` makes ``kraken2-inspect`` print only the
+    summary header (``# Total taxonomy nodes: N``) without the
+    per-taxon table, which is the opposite of what we want; the
+    full per-taxon listing is the input to :func:`parse_kraken_inspect`.
+    """
     result = subprocess.run(
-        ["kraken2-inspect", "--db", str(kraken_db), "--skip-counts"],
+        ["kraken2-inspect", "--db", str(kraken_db)],
         check=True,
         capture_output=True,
         text=True,
