@@ -302,6 +302,23 @@ def build_per_virus_rows(
     taxid_to_name = {int(r.taxonomy_id): r.name for r in viral.itertuples()}
     contigs_by_taxid = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
 
+    # Detect the MEGAHIT-failure-fallback case: the upstream rule
+    # writes a single DUMMY_CONTIG sequence when MEGAHIT crashes (most
+    # commonly on Apple Silicon at small k). Pilon then polishes that
+    # into ``DUMMY_CONTIG_pilon``. Without surfacing it, downstream
+    # per-virus rows report "contigs: 0" with otherwise normal reads
+    # counts and look indistinguishable from a low-coverage real run.
+    # Flag every per-virus row of such samples so reviewers can spot
+    # silent assembly failures.
+    sample_note = ""
+    if not blastn_df.empty and "name" in blastn_df.columns:
+        contig_names = blastn_df["name"].dropna().astype(str)
+        if (
+            len(contig_names) > 0
+            and contig_names.str.startswith("DUMMY_CONTIG").all()
+        ):
+            sample_note = "MEGAHIT assembly failed; dummy contig only"
+
     date_part = run_name.split("_")[0] if run_name else ""
 
     rows: list[dict] = []
@@ -350,7 +367,7 @@ def build_per_virus_rows(
             "human_reads_percent": human_pct,
             "non_human_reads": non_human_reads,
             "non_human_reads_percent": non_human_pct,
-            "note": "",
+            "note": sample_note,
             "specific_virus_rpm": specific_rpm,
             "all_virus_rpm": all_virus_rpm,
             "completeness_5x": completeness_5x,

@@ -282,6 +282,114 @@ def test_build_per_virus_rows_aggregates_multi_reference_taxid(tmp_path):
     assert row_a["date"] == "251015"
 
 
+def test_build_per_virus_rows_viral_only_kraken_uses_r1_anchor():
+    """Mirror the smaller k2_viral_* DB shape where Viruses sits at
+    tax_lvl == 'R1'. The Domain row's count_clades must still feed
+    all_viral_reads and the resulting all_virus_rpm.
+    """
+    kraken = _kraken_df(
+        [
+            (3.0, 30, 30, "U", 0, "unclassified", "unclassified"),
+            (97.0, 970, 0, "R", 1, "root", "root"),
+            (97.0, 970, 0, "R1", 10239, "Viruses", "Viruses"),
+            (60.0, 600, 600, "S", 42, "Phage A", "Viruses"),
+        ]
+    )
+    df = build_per_virus_rows(
+        run_name="251015_test",
+        sample_name="s_R",
+        kraken_df=kraken,
+        kaiju_df=pd.DataFrame(),
+        blastn_df=pd.DataFrame(),
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={},
+        thresholds={},
+        total_reads=1000,
+        human_reads=30,
+        top_n=10,
+    )
+    # The R1 anchor must surface "Viruses" as a row, and the
+    # all_virus_rpm must reflect the 970 reads from the R1 row's
+    # count_clades (not 0 as it would be with a D-only anchor).
+    row = df.loc[df["virus_name_kraken"] == "Phage A"].iloc[0]
+    assert row["all_virus_rpm"] == 970 * 1_000_000.0 / 1000
+    assert row["other_reads"] == (1000 - 30) - 970
+
+
+def test_build_per_virus_rows_flags_dummy_contig_in_note():
+    """When the BLASTN merged CSV's only contig is the DUMMY_CONTIG
+    Pilon-polished placeholder, every per-virus row should carry a
+    note flagging the silent MEGAHIT failure so reviewers do not read
+    the report as a clean negative result.
+    """
+    kraken = _kraken_df(
+        [
+            (10.0, 100, 100, "D", 10239, "Viruses", "Viruses"),
+            (5.0, 50, 50, "S", 42, "Phage A", "Viruses"),
+        ]
+    )
+    # bblastn merged CSV: only the dummy contig made it through.
+    blastn = pd.DataFrame(
+        {
+            "name": ["DUMMY_CONTIG_pilon"],
+            "match_name": [""],
+            "accession": [""],
+        }
+    )
+    df = build_per_virus_rows(
+        run_name="x",
+        sample_name="s",
+        kraken_df=kraken,
+        kaiju_df=pd.DataFrame(),
+        blastn_df=blastn,
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={},
+        thresholds={},
+        total_reads=1000,
+        human_reads=10,
+        top_n=10,
+    )
+    assert not df.empty
+    assert (df["note"] == "MEGAHIT assembly failed; dummy contig only").all()
+
+
+def test_build_per_virus_rows_real_contigs_leave_note_empty():
+    """Sanity check the opposite branch — a real contig keeps note=''."""
+    kraken = _kraken_df(
+        [
+            (10.0, 100, 100, "D", 10239, "Viruses", "Viruses"),
+            (5.0, 50, 50, "S", 42, "Phage A", "Viruses"),
+        ]
+    )
+    blastn = pd.DataFrame(
+        {
+            "name": ["k57_0_pilon"],
+            "match_name": ["Phage A"],
+            "accession": ["NC_001.1"],
+        }
+    )
+    df = build_per_virus_rows(
+        run_name="x",
+        sample_name="s",
+        kraken_df=kraken,
+        kaiju_df=pd.DataFrame(),
+        blastn_df=blastn,
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={},
+        thresholds={},
+        total_reads=1000,
+        human_reads=10,
+        top_n=10,
+    )
+    assert (df["note"] == "").all()
+
+
 def test_build_per_virus_rows_zero_total_reads_does_not_divide_by_zero():
     kraken = _kraken_df(
         [
