@@ -69,34 +69,66 @@ rule megahit:
         #      small inputs (raising the minimum k past 21 avoids
         #      the buggy path);
         #   4. `megahit_core_no_hw_accel assemble` segfaults
-        #      (SIGSEGV or SIGABRT) on some inputs once k >= 77.
+        #      (SIGSEGV or SIGABRT) on some inputs once k > 57. The
+        #      first ceiling we tried (--k-max 67) held for the smoke
+        #      fixture and a handful of subsamples but tripped on
+        #      DRRKK sample 142, so the cap is now 57 to err on the
+        #      side of stability.
         #
         # Force the no_hw_accel variant, cap threads at 2, and clamp
-        # the k range to [27, 67] on Darwin/arm64. All four flags are
+        # the k range to [27, 57] on Darwin/arm64. All four flags are
         # no-ops or harmless on Linux, but the k-range narrowing is
         # an assembly-quality concession so it is gated on the
         # platform check rather than applied globally.
         is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
         no_hw_accel = "--no-hw-accel " if is_apple_silicon else ""
         kmin_flag = "--k-min 27 " if is_apple_silicon else ""
-        kmax_flag = "--k-max 67 " if is_apple_silicon else ""
+        kmax_flag = "--k-max 57 " if is_apple_silicon else ""
         mh_threads = min(threads, 2) if is_apple_silicon else threads
-        try:
-            shell(
-                "megahit "
-                "-1 {input.r1} -2 {input.r2} "
-                "-o {params.out_dir} "
-                "--out-prefix {wildcards.sample} "
-                f"-t {mh_threads} "
-                f"-m {mem_fraction} "
-                f"{no_hw_accel}"
-                f"{kmin_flag}"
-                f"{kmax_flag}"
-                "2> {log}"
-            )
-        except subprocess.CalledProcessError:
-            # MEGAHIT can SIGSEGV on tiny inputs. Make sure the output file
-            # exists so the dummy-contig fallback below writes to it.
+
+        # Apple Silicon megahit_core_no_hw_accel SIGSEGVs
+        # non-deterministically on real clinical input — the same
+        # invocation succeeds on one run and crashes on the next.
+        # Retry up to MEGAHIT_RETRIES times (default 4) before falling
+        # back to the dummy contig. Each retry wipes the partial
+        # output dir; MEGAHIT refuses to start otherwise. Linux defaults
+        # to one attempt, since the segfault path does not exist there.
+        max_attempts = (
+            int(config.get("MEGAHIT_RETRIES", 4)) + 1 if is_apple_silicon else 1
+        )
+
+        success = False
+        for attempt in range(1, max_attempts + 1):
+            shell("rm -rf {params.out_dir}")
+            try:
+                shell(
+                    "megahit "
+                    "-1 {input.r1} -2 {input.r2} "
+                    "-o {params.out_dir} "
+                    "--out-prefix {wildcards.sample} "
+                    f"-t {mh_threads} "
+                    f"-m {mem_fraction} "
+                    f"{no_hw_accel}"
+                    f"{kmin_flag}"
+                    f"{kmax_flag}"
+                    "2> {log}"
+                )
+                if Path(output.contigs).exists() and Path(output.contigs).stat().st_size > 0:
+                    success = True
+                    break
+            except subprocess.CalledProcessError:
+                # SIGSEGV / SIGABRT from megahit_core_no_hw_accel. The
+                # next loop iteration wipes the output dir and retries.
+                # `2> {log}` overwrites the log each attempt, so only
+                # the final attempt's stderr is preserved — which is
+                # what the user needs to diagnose the persistent
+                # failure case.
+                continue
+
+        if not success:
+            # Final fallback: emit a dummy contig file so downstream
+            # rules (Pilon, BLASTN, CheckV) still have an input to
+            # process. Mirrors the original virusHanter behaviour.
             Path(params.out_dir).mkdir(parents=True, exist_ok=True)
             Path(output.contigs).touch()
 
