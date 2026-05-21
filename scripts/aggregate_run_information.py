@@ -68,14 +68,16 @@ def aggregate_sample_info(sample_folder: Path) -> pd.DataFrame:
             100.0 * total_dup / examined if examined > 0 else 0.0
         )
 
-    # Kraken Domain-level viral percent. The Kraken wrangled CSV contains a
-    # single row with name == "Viruses" (the Domain row, tax_lvl == "D");
-    # its percent already accounts for every species clade beneath it.
+    # Kraken Domain-level viral percent. The Kraken wrangled CSV
+    # contains a single row with name == "Viruses"; its percent
+    # already accounts for every species clade beneath it.
+    # tax_lvl is "D" in the standard pluspf DB and "R1" in the small
+    # viral-only DBs (e.g. k2_viral_*), so accept either.
     kraken_df = pd.read_csv(
         sample_folder / "KRAKEN" / f"{sample_name}.kraken.csv"
     )
     domain_rows = kraken_df.loc[
-        (kraken_df["tax_lvl"] == "D") & (kraken_df["name"] == "Viruses"),
+        (kraken_df["tax_lvl"].isin(["D", "R1"])) & (kraken_df["name"] == "Viruses"),
         "percent",
     ]
     kraken_virus_percent = float(domain_rows.iloc[0]) if not domain_rows.empty else 0.0

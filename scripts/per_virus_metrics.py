@@ -272,13 +272,15 @@ def build_per_virus_rows(
     """
     viral = kraken_viral_top_n(kraken_df, top_n=top_n)
 
-    # All-virus reads = the Domain "Viruses" row's `count_clades`, which
-    # already accounts for every species clade beneath it. Summing the
-    # whole `domain == "Viruses"` subtree would double-count (Domain +
-    # all descendants). Matches the `kraken_virus_percent` parity fix
-    # in `aggregate_run_information.py`.
+    # All-virus reads = the Domain "Viruses" row's `count_clades`,
+    # which already accounts for every species clade beneath it.
+    # Summing the whole `domain == "Viruses"` subtree would
+    # double-count (Domain + all descendants). Accept either tax_lvl
+    # "D" (pluspf) or "R1" (viral-only DBs such as k2_viral_*).
+    # Matches the `kraken_virus_percent` parity fix in
+    # `aggregate_run_information.py`.
     domain_rows = kraken_df.loc[
-        (kraken_df["tax_lvl"] == "D") & (kraken_df["name"] == "Viruses"),
+        (kraken_df["tax_lvl"].isin(["D", "R1"])) & (kraken_df["name"] == "Viruses"),
         "count_clades",
     ]
     all_viral_reads = int(domain_rows.iloc[0]) if not domain_rows.empty else 0
