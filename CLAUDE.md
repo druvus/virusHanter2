@@ -31,6 +31,9 @@ scripts/
   build_virus_parquet.py  Reference parquet builder (utility)
 config/                 Production, default and JSON schema
 envs/                   One conda yaml per rule
+refresh/                Standalone Snakemake workflow that rebuilds
+                        VIRUS_PARQUET from NCBI Virus; not part of
+                        the main pipeline DAG
 test/                   Mini-fixture build_fixtures + run_smoke
 docs/                   Long-form documentation
 ```

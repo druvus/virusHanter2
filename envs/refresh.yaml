@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.12
+  - pandas>=2.0
+  - pyarrow>=15
+  - pyfastx>=2.1
+  - wget
+  - gzip

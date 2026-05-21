@@ -1,0 +1,22 @@
+# Example config for refresh/refresh_virus_parquet.smk.
+#
+# Copy this file alongside as refresh/config.local.yaml and edit
+# the paths, then run:
+#
+#   snakemake -s refresh/refresh_virus_parquet.smk \
+#       --configfile refresh/config.local.yaml --cores 4 \
+#       --sdm conda
+
+# Where the final parquet should land. The path the main pipeline
+# config points at via VIRUS_PARQUET.
+OUTPUT_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+
+# Working directory for the FASTA and accession2taxid downloads.
+# Pick a location with at least 20 GB free.
+DOWNLOAD_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
+
+# Source URLs. Override if you want a different snapshot. The
+# defaults pull the NCBI viral nucleotide FASTA and the matching
+# nucleotide accession2taxid.
+# NCBI_VIRUS_FASTA_URL: "https://ftp.ncbi.nlm.nih.gov/refseq/release/viral/viral.1.1.genomic.fna.gz"
+# ACCESSION2TAXID_URL:  "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/nucl_gb.accession2taxid.gz"

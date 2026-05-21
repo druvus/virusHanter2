@@ -73,28 +73,60 @@ Finder never creates the shadows in the first place.
 ## Rebuilding `all_viruses.parquet`
 
 The parquet is keyed by `(name, sequence, tax_id)` and is consumed by
-`bwa_align_to_kraken_hits` to pick reference sequences for the top
-Kraken2 viral taxids, and by `per_virus_metrics` to attribute
-contigs and aggregate coverage per taxid. Refresh it whenever the
-viral RefSeq FASTA changes, using the bounded-memory builder.
+`bwa_align_to_kraken_hits` to pick reference sequences for the union
+of classifier viral taxids, and by `per_virus_metrics` to attribute
+contigs and aggregate coverage per taxid.
+
+The rebuild is driven by a standalone Snakemake workflow under
+`refresh/`. The workflow downloads the NCBI viral nucleotide FASTA
+and the matching `nucl_gb.accession2taxid.gz`, runs the bounded-memory
+builder, and emits a `build_stats.json` sidecar so the operator can
+see the headline numbers without re-reading the parquet.
 
 ```
+conda activate virushanter
 cd /Users/andreassjodin/Code/regionen/virusHanter2
+
+# First time only: copy the example config and edit the paths.
+cp refresh/config.yaml refresh/config.local.yaml
+$EDITOR refresh/config.local.yaml
+
+# Run the refresh. Re-running is idempotent thanks to Snakemake's
+# mtime tracking; pass `--forcerun build_parquet` to rebuild on the
+# existing downloads.
+snakemake -s refresh/refresh_virus_parquet.smk \
+    --configfile refresh/config.local.yaml --cores 4 \
+    --sdm conda
+```
+
+The builder keeps **one longest sequence per `tax_id`**
+(`--one-rep-per-taxid`, on by default). The "longest" heuristic
+biases toward complete genomes and keeps the parquet small enough
+for consumers to load into a single in-memory DataFrame, even when
+the upstream FASTA carries many GenBank submissions per species.
+`tax_id == 0` rows (accessions the streamed accession2taxid map
+could not resolve) are dropped in this mode.
+
+`build_stats.json` records the source, build date, input record
+count, post-dedup row count, unique taxid count and basic length
+statistics.
+
+Pre-2026-05-21 builds used viral RefSeq alone. Reproduce that with:
+
+```
 python scripts/build_virus_parquet.py \
+    --source refseq --no-one-rep-per-taxid \
     --fasta /Volumes/LaCie/REGIONEN/ref_dbs/VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna \
     --taxid /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz \
-    --out   /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet
+    --out   /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses_refseq.parquet
 ```
 
-The script streams the gzipped `nucl_gb.accession2taxid` and keeps
-only the entries whose accession appears in the viral FASTA (~30k
-keys). Memory stays bounded.
-
-Last successful rebuild on this workstation (2026-05-17): 19,149
-records, 14,899 unique tax_ids, 39 records (0.2%) without a taxid,
-mean reference length 30 kb. The 39 unmatched records are normal —
-typically very recent submissions whose accession2taxid mapping has
-not propagated yet.
+Last successful RefSeq-only rebuild on this workstation (2026-05-17):
+19,149 records, 14,899 unique tax_ids, 39 records (0.2%) without a
+taxid, mean reference length 30 kb. The new NCBI Virus rebuild is
+expected to grow the unique-taxid count materially (target ~16-18 k
+once the ICTV-2024 Alphatorquevirus strains land in NCBI's release)
+while keeping the row count in the same order of magnitude.
 
 ## Sources for the inputs
 
