@@ -102,12 +102,14 @@ rule all:
 
 
 rule download_refseq_viral_nucleotide:
-    """Recursively pull every viral.N.1.genomic.fna.gz part from
-    the NCBI RefSeq viral FTP directory. NCBI publishes the release
-    as multiple files; the part count varies per release and cannot
-    be predicted at workflow-build time, so the rule emits a
-    sentinel marker file and the decompress rule globs the staging
-    directory."""
+    """Pull every viral.N.1.genomic.fna.gz part from the NCBI
+    RefSeq viral FTP directory. NCBI publishes the release as
+    multiple files; the part count varies per release and cannot
+    be predicted at workflow-build time, so the rule fetches the
+    directory listing, greps for matching filenames, and downloads
+    each. Recursive wget with `--accept '<glob>'` failed silently
+    on this NCBI listing (only index.html + robots.txt got pulled),
+    hence the enumerate-then-fetch approach."""
     output:
         marker=str(FASTA_MARKER),
     params:
@@ -120,11 +122,22 @@ rule download_refseq_viral_nucleotide:
     shell:
         """
         mkdir -p {params.out_dir} $(dirname {log})
-        wget --no-verbose --no-parent --no-directories \
-            --recursive --level 1 \
-            --accept 'viral.*.1.genomic.fna.gz' \
-            -P {params.out_dir} \
-            {params.url_dir} 2> {log}
+        # Fetch the directory listing, extract matching filenames,
+        # download each part. `grep -oE` finds the bare filename
+        # tokens regardless of the surrounding HTML.
+        curl --silent --show-error --fail {params.url_dir} \
+            | grep -oE 'viral\\.[0-9]+\\.1\\.genomic\\.fna\\.gz' \
+            | sort -u \
+            | tee {params.out_dir}/.parts_list > {log}
+        if [ ! -s {params.out_dir}/.parts_list ]; then
+            echo "ERROR: no viral.*.1.genomic.fna.gz parts found at {params.url_dir}" >> {log}
+            exit 1
+        fi
+        while read part; do
+            echo "fetching $part" >> {log}
+            wget --no-verbose -O {params.out_dir}/$part \
+                {params.url_dir}$part >> {log} 2>&1
+        done < {params.out_dir}/.parts_list
         touch {output.marker}
         """
 
@@ -151,9 +164,11 @@ rule decompress_fasta:
 
 
 rule download_refseq_viral_proteins:
-    """Recursively pull every viral.N.protein.faa.gz part from the
-    NCBI RefSeq viral FTP directory. Used to build the matching
-    Kaiju index from the same RefSeq snapshot as the parquet."""
+    """Pull every viral.N.protein.faa.gz part from the NCBI RefSeq
+    viral FTP directory. Used to build the matching Kaiju index
+    from the same RefSeq snapshot as the parquet. Same
+    enumerate-then-fetch approach as
+    `download_refseq_viral_nucleotide`."""
     output:
         marker=str(PROTEIN_MARKER),
     params:
@@ -166,11 +181,19 @@ rule download_refseq_viral_proteins:
     shell:
         """
         mkdir -p {params.out_dir}
-        wget --no-verbose --no-parent --no-directories \
-            --recursive --level 1 \
-            --accept 'viral.*.protein.faa.gz' \
-            -P {params.out_dir} \
-            {params.url_dir} 2> {log}
+        curl --silent --show-error --fail {params.url_dir} \
+            | grep -oE 'viral\\.[0-9]+\\.protein\\.faa\\.gz' \
+            | sort -u \
+            | tee {params.out_dir}/.parts_list > {log}
+        if [ ! -s {params.out_dir}/.parts_list ]; then
+            echo "ERROR: no viral.*.protein.faa.gz parts found at {params.url_dir}" >> {log}
+            exit 1
+        fi
+        while read part; do
+            echo "fetching $part" >> {log}
+            wget --no-verbose -O {params.out_dir}/$part \
+                {params.url_dir}$part >> {log} 2>&1
+        done < {params.out_dir}/.parts_list
         touch {output.marker}
         """
 

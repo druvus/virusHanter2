@@ -7,7 +7,9 @@ dependencies:
   - pyarrow>=15
   - pyfastx>=2.1
   - wget
+  - curl
   - gzip
+  - grep
   # kraken2 is needed only for the `kraken2-inspect` call that
   # produces the overlap-with-Kraken2 sidecar; the index itself
   # comes from NCBI's pre-built tarball, not from this env.
