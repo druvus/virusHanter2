@@ -171,3 +171,6 @@ test/*.fastq
 test/*.fastq.gz
 test/*.fq
 test/*.fq.gz
+.DS_Store
+config/config.drrkk*.yaml
+config/config.real_subsample.yaml
