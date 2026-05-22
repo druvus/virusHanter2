@@ -71,6 +71,21 @@ run_full() {
     local samples=("sample1_R" "sample2_R" "sample3_R")
     local sample_dir="test/results/test"
 
+    # The smoke ships with `QUAST: "TRUE"` in config.test.yaml so the
+    # rendered report carries an assembly-QC sub-tab per assembler.
+    # Bioconda's osx-arm64 channel ships only QUAST 4.x while
+    # envs/quast.yaml pins >=5.2, so on Apple Silicon we widen the
+    # subdir search for *this run only* — Snakemake will pick up the
+    # osx-64 build via Rosetta when materialising the per-rule env.
+    if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+        export CONDA_SUBDIR=osx-64
+        echo "[smoke] Apple Silicon: CONDA_SUBDIR=osx-64 set for QUAST env materialisation"
+    fi
+
+    # Default to MEGAHIT + metaSPAdes — the production default. Override
+    # by exporting SMOKE_ASSEMBLERS before invoking this script.
+    local assemblers=("MEGAHIT" "SPAdes")
+
     if [[ "$checkv_ready" == "1" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"
         snakemake --sdm conda --cores 2 --configfile "$CONFIG"
@@ -79,8 +94,15 @@ run_full() {
         for s in "${samples[@]}"; do
             local html="$sample_dir/$s/REPORT/$s.html"
             [[ -s "$html" ]] || { echo "[smoke] FAIL: missing $html"; exit 1; }
+            # Per-assembler QUAST report.tsv lives at
+            # `<sample>/<assembler>/QUAST/report.tsv`. The smoke
+            # asserts every assembler produced one.
+            for a in "${assemblers[@]}"; do
+                local quast_tsv="$sample_dir/$s/$a/QUAST/report.tsv"
+                [[ -s "$quast_tsv" ]] || { echo "[smoke] FAIL: missing $quast_tsv"; exit 1; }
+            done
         done
-        echo "[smoke] OK: $run_csv plus REPORT/<sample>.html for ${samples[*]}"
+        echo "[smoke] OK: $run_csv, REPORT/<sample>.html, per-assembler QUAST/report.tsv for ${samples[*]}"
     else
         echo "[smoke] CheckV DB is stubbed; running everything that doesn't depend on CheckV"
         # Terminal rules whose combined dependencies cover the assembly

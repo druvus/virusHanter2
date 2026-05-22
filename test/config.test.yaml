@@ -27,10 +27,14 @@ PILON_MEM: "2G"
 # The smoke does not need a workflow-level MultiQC report. Enable it
 # explicitly when verifying that path.
 MULTIQC: "FALSE"
-# Parity-preserving defaults for the smoke. Flip to "TRUE" to exercise
-# the optional steps end-to-end. Note: QUAST cannot run on Apple
-# Silicon because bioconda lacks an osx-arm64 build of quast; on a
-# Linux host or with CONDA_SUBDIR=osx-64 set, flipping QUAST: "TRUE"
-# is fine and the smoke materialises the env automatically.
+# Parity-preserving defaults for the smoke; flip to "TRUE" to
+# exercise the optional steps end-to-end.
 DEDUPLICATE: "FALSE"
-QUAST: "FALSE"
+
+# QUAST is on by default in the smoke so the rendered report
+# carries an assembly-QC sub-tab per assembler. Bioconda's
+# osx-arm64 channel ships only QUAST 4.x while envs/quast.yaml
+# pins >=5.2, so on Apple Silicon `run_smoke.sh` sets
+# CONDA_SUBDIR=osx-64 just for the QUAST env's materialisation.
+# Flip to "FALSE" if you want to skip QUAST entirely.
+QUAST: "TRUE"
