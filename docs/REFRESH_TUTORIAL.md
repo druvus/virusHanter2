@@ -1,0 +1,213 @@
+# Tutorial: rebuild the classification databases from one snapshot
+
+The classification stack in `virusHanter2` is held together by the
+NCBI taxonomy ID:
+
+- **`VIRUS_PARQUET`** carries one nucleotide reference per viral
+  tax_id and drives the BWA + mosdepth coverage step.
+- **`KAIJU_DB`** is a Burrows–Wheeler protein index whose
+  sequences are tagged with NCBI tax_ids.
+- **`KRAKEN_DB`** is a *k*-mer-based DNA index whose leaves are
+  NCBI tax_ids.
+- **`BLASTN_DB`** is a nucleotide BLAST database (alias) whose
+  hits are mapped back to tax_ids via the `taxdb` files NCBI
+  publishes alongside.
+- **`TAXDUMP_NODES`** (optional) is the NCBI `nodes.dmp` the
+  coverage rule uses for the rank filter and the genus walk-up.
+
+When these databases are built from different NCBI snapshots, a
+read can be classified to a taxon by Kraken2 that has no
+representative reference in the parquet, or Kaiju can hit a
+protein under a taxon that Kraken2 does not know exists yet. The
+existing rank filter + genus walk-up shipped in the pipeline
+absorbs the residual asymmetry at runtime, but starting from a
+single coordinated snapshot keeps the diagnostic load light.
+
+The refresh workflow at
+[`refresh/refresh_virus_parquet.smk`](../refresh/refresh_virus_parquet.smk)
+rebuilds the parquet and the Kaiju FM-index from the same NCBI
+viral RefSeq snapshot, downloads the matching taxdump
+(`nodes.dmp` + `names.dmp`) and pulls the production Kraken2
+viral tarball, then emits an overlap-with-Kraken2 sidecar so the
+operator can see at a glance which tax_ids are covered by which
+classifier. BLAST refresh is documented but stays manual because
+NCBI publishes pre-built BLAST viral DBs that need only
+`update_blastdb.pl`.
+
+## What you need before you start
+
+- A LaCie-class external drive (or any volume with ~40 GB free
+  for downloads and ~5 GB for the published outputs).
+- The `virushanter` conda env active (or any env with
+  `snakemake-minimal=9.14.*` plus `pandas`, `pyarrow`, `pyfastx`,
+  `requests`-stack — the refresh workflow materialises its own
+  per-rule conda env from `envs/refresh.yaml` regardless).
+- ~1 hour of wall time on a residential connection: the longest
+  pole is the ~11 GB `prot.accession2taxid.gz` download.
+
+## One-shot refresh
+
+```bash
+conda activate virushanter
+cd virusHanter2
+
+# First time only: copy the example config and edit paths.
+cp refresh/config.yaml refresh/config.local.yaml
+$EDITOR refresh/config.local.yaml
+
+# Run. Re-running with the same config is idempotent thanks to
+# Snakemake's mtime tracking; pass --rerun-incomplete if a previous
+# attempt was interrupted.
+snakemake -s refresh/refresh_virus_parquet.smk \
+    --configfile refresh/config.local.yaml --cores 4 \
+    --sdm conda
+```
+
+`refresh/config.local.yaml` carries four key paths:
+
+```yaml
+OUTPUT_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+DOWNLOAD_DIR:   "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
+KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+# Source URLs default to the canonical NCBI FTP paths; override
+# only when you want a pinned snapshot.
+```
+
+## What the workflow does
+
+The DAG follows the `download_*` / `extract_*` / `build_*` /
+`publish_*` rule pattern. From a clean working directory the
+sequence is:
+
+1. **Download** the multi-part viral RefSeq genomic FASTA
+   (`viral.*.1.genomic.fna.gz`), the matching protein FASTA
+   (`viral.*.protein.faa.gz`), the nucleotide and protein
+   accession2taxid mappings, and the NCBI taxdump tarball. The
+   rules use `curl` (not `wget`) so the `utime()` LaCie filesystem
+   quirk does not abort the chain.
+2. **Decompress** the parts into single concatenated FASTAs and
+   extract `nodes.dmp` + `names.dmp` from `taxdump.tar.gz`.
+3. **Build the parquet** via
+   [`scripts/build_virus_parquet.py`](../scripts/build_virus_parquet.py)
+   with `--source refseq --one-rep-per-taxid --taxdump-nodes nodes.dmp`.
+   Each row carries `name`, `sequence`, `tax_id`, `rank`,
+   `genus_taxid`.
+4. **Build the Kaiju FMI index** from the protein FASTA. Headers
+   are rewritten to the bare-tax_id format Kaiju's `kaiju-mkbwt`
+   actually expects (see the dedicated header rewriter at
+   [`scripts/reformat_kaiju_headers.py`](../scripts/reformat_kaiju_headers.py)),
+   then `kaiju-mkbwt` and `kaiju-mkfmi` build the index. The
+   resulting `kaiju_refseq_viral.fmi` is published next to the
+   parquet alongside `nodes.dmp` and `names.dmp`.
+5. **Publish** the `nodes.dmp` to a stable path next to the
+   parquet so the main pipeline's `TAXDUMP_NODES` config key can
+   point at it without re-extracting the tar.
+6. **Compare with Kraken2** via
+   [`scripts/compare_parquet_kraken2.py`](../scripts/compare_parquet_kraken2.py):
+   call `kraken2-inspect` against the configured production
+   Kraken2 DB and emit `all_viruses_vs_kraken2.tsv` next to the
+   parquet, plus add overlap counters to `build_stats.json`.
+
+## Expected outputs
+
+After a successful refresh the parquet's directory looks like:
+
+```
+/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
+├── all_viruses.parquet               (~250 MB)
+├── all_viruses_build_stats.json
+├── all_viruses_vs_kraken2.tsv        (one row per tax_id; ~1 MB)
+├── nodes.dmp                         (~215 MB)
+└── kaiju_refseq_viral/
+    ├── kaiju_refseq_viral.fmi        (~250 MB)
+    ├── nodes.dmp
+    └── names.dmp
+```
+
+`build_stats.json` records:
+
+- `input_records` / `output_records` — input FASTA size vs after
+  one-rep-per-taxid dedup
+- `unique_taxids` — typically ~14 900 from viral RefSeq
+- `rank_distribution` — `no rank`, `species`, `serotype` etc.
+- `with_genus_taxid_count` — rows whose taxdump walk-up resolved
+  to a genus (typically ~86%)
+- `intersection_count` — tax_ids in **both** the parquet and the
+  Kraken2 DB
+- `parquet_only_count` / `kraken2_only_count` — the residual
+  asymmetry. Kraken2 typically knows ~16 000 more tax_ids than the
+  parquet has references for (NCBI taxonomy propagation), and the
+  parquet has ~400 RefSeq-only tax_ids that the pre-built Kraken2
+  tarball does not.
+
+## Point the pipeline at the refreshed databases
+
+Update your run config (e.g. `config/config.local.yaml`):
+
+```yaml
+VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+TAXDUMP_NODES: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
+KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
+KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+BLASTN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
+```
+
+Force `bwa_align_to_kraken_hits` and `kaiju` to re-run on the
+samples you care about so the coverage references and the Kaiju
+classifications pick up the new databases:
+
+```bash
+snakemake --sdm conda --cores 4 \
+    --configfile config/config.local.yaml \
+    --forcerun bwa_align_to_kraken_hits kaiju
+```
+
+## BLAST viral DB refresh (manual)
+
+NCBI publishes the BLAST viral DBs as pre-built tarballs.
+Refresh them with the `update_blastdb.pl` script from the
+BLAST+ toolkit:
+
+```bash
+cd /Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db
+update_blastdb.pl ref_viruses_rep_genomes mito_rna_db
+update_blastdb.pl --decompress taxdb
+```
+
+The hand-written `viral_rna_mito.nal` alias the pipeline points
+at stays as-is across refreshes; it references the two
+underlying BLAST DBs by name. Keep refresh dates close to the
+parquet rebuild so the four classifier DBs share a coordinated
+snapshot.
+
+## Troubleshooting
+
+**`utime() ... No such file or directory` in a download log.**
+The fix is already in: `curl` replaced `wget` for the large
+download rules in this workflow. If you see it on a different
+volume, the same `curl --silent --show-error --fail --location`
+invocation in `refresh/refresh_virus_parquet.smk` is the pattern
+to follow.
+
+**`IncompleteFilesException` or `LockException` on retry.** Pass
+`--rerun-incomplete` and (if a previous run was killed) the
+workflow may also need `snakemake -s refresh/... --unlock`
+once. Outputs that survived the previous attempt are kept; the
+broken file gets re-downloaded.
+
+**Kaiju classifies reads to plant / fungal taxa.** That means
+the Kaiju FMI was built with the wrong header format. Verify
+with `head -1 _refresh_workdir/kaiju_refseq_viral.faa` — the
+header should be a bare integer (`>1980428`) not the
+`>kaiju|<taxid>|<accession>` format documented on some
+third-party pages. The current
+[`reformat_kaiju_headers.py`](../scripts/reformat_kaiju_headers.py)
+emits the bare-integer format; rerun the build if the FMI on
+disk pre-dates this fix.
+
+**Kraken2 overlap reports 0 taxids.** That means
+`kraken2-inspect` was invoked with `--skip-counts`, which
+suppresses the per-taxon table the parser needs. The current
+[`compare_parquet_kraken2.py`](../scripts/compare_parquet_kraken2.py)
+does not pass that flag; if you see a stale result rerun the
+`compare_with_kraken2` rule with `--forcerun`.

@@ -30,12 +30,23 @@ rendered in the per-sample HTML report from the mosdepth
 | `human_reads_percent` | `100 * human_reads / total_reads`. |
 | `non_human_reads` | `total_reads - human_reads`. |
 | `non_human_reads_percent` | `100 - human_reads_percent`. |
-| `note` | Empty; placeholder for manual annotation. |
+| `note` | Empty for clean runs; carries `"MEGAHIT assembly failed; dummy contig only"` when every BLASTN contig for the sample is the `DUMMY_CONTIG` fallback so silent assembly failures are visible. |
 | `specific_virus_rpm` | `virus_reads_kraken2 / total_reads * 1e6`. |
 | `all_virus_rpm` | `all_viral_kraken_reads / total_reads * 1e6`. `all_viral_kraken_reads` is the Kraken Domain "Viruses" row's `count_clades` (already accounts for descendant clades). |
 | `completeness_5x` | Fraction of reference bases with mosdepth depth >= 5 across all references for this taxid. 0-1. |
 | `bases_above_5x` | Raw base count >= 5x across all references for this taxid. |
 | `mean_coverage` | Weighted mean depth: `sum(bases_aligned) / sum(reference_length)` across references. |
+
+### Trailing additive columns
+
+Appended after the parity-locked columns above; tolerated by all
+existing consumers because they read the CSV by column name.
+
+| Column | Source / formula |
+|---|---|
+| `<assembler>_contigs` | One column per active entry in `config[ASSEMBLERS]`. Count of BLASTN-merged contigs attributed to this taxid **for that assembler**. Sums to `contigs` across assemblers. |
+| `genomad_viral_contigs` | When `GENOMAD: "TRUE"`: count of attributed contigs geNomad called viral. |
+| `genomad_max_virus_score` | When `GENOMAD: "TRUE"`: highest geNomad `virus_score` among the attributed contigs. |
 
 A virus that is in the Kraken top-N but has no aligned reads ends up
 with `bases_above_5x = 0`, `completeness_5x = 0`, `mean_coverage = 0`.
@@ -97,7 +108,11 @@ every batch's `per_virus_<batch>.csv`. Each input row carries its own
 - Kaiju TSV -> `virus_name_kaiju` joined by `taxon_id`.
 - BLASTN merged CSV (with CheckV inner join) -> `contigs` via either
   parquet-accession match or first-token substring against the
-  Kraken taxon name.
+  Kraken taxon name. With `config[ASSEMBLERS]` carrying more than
+  one entry the script reads every per-assembler merged CSV and
+  partitions the matched contigs across the trailing
+  `<assembler>_contigs` columns; the parity-existing `contigs`
+  column sums across assemblers.
 - mosdepth `summary.txt` -> per-reference length, total bases, mean.
 - mosdepth `thresholds.bed.gz` (from `--thresholds 1,5,10`) ->
   per-reference `bases_above_5x` (sum of the 5X column per chrom).

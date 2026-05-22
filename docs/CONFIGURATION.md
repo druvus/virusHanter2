@@ -3,11 +3,12 @@
 The pipeline reads two files at startup: `config/config.yaml` (your
 inputs and database paths) and `config/config.schema.yaml` (a JSON
 schema that fails fast on placeholder paths). All Conda environments
-are declared in `envs/*.yaml` and materialised on demand by Snakemake.
+are declared in `envs/*.yaml` and materialised on demand by
+Snakemake.
 
 ## `config/config.yaml`
 
-Required keys:
+### Required keys
 
 | Key | Purpose |
 |---|---|
@@ -17,25 +18,43 @@ Required keys:
 | `HUMAN_INDEX` | BWA index prefix for the host (human) genome. |
 | `KAIJU_DB` | Directory containing `.fmi`, `names.dmp`, `nodes.dmp`. |
 | `KRAKEN_DB` | Kraken2 database directory (with `hash.k2d`, `opts.k2d`, `taxo.k2d`). |
-| `BLASTN_DB` | BLAST nucleotide database **prefix** (e.g. the `.nal` alias name). The runner derives `BLASTDB` from the parent directory so taxdb lookups work. |
+| `BLASTN_DB` | BLAST nucleotide database **prefix** (e.g. the `.nal` alias name). |
 | `CHECKV_DB` | CheckV database directory. |
-| `VIRUS_PARQUET` | Parquet with columns `(name, sequence, tax_id)` used to pick references for the kraken-top-N coverage step. See [REFERENCE_DBS.md](REFERENCE_DBS.md) for the build recipe. |
-| `NUMBER_OF_PLOTS` | Top-N Kraken viral hits to include (default `10`). Drives both the references mapped by `bwa_align_to_kraken_hits` and the per-virus CSV row count. |
+| `VIRUS_PARQUET` | Parquet with columns `(name, sequence, tax_id, rank, genus_taxid)` used by `bwa_align_to_kraken_hits`. The `rank` and `genus_taxid` columns are added when the parquet is built with `--taxdump-nodes`; older 3-column parquets still work but the rank filter + genus walk-up degrade to no-ops. See [REFERENCE_DBS.md](REFERENCE_DBS.md) and the [refresh tutorial](REFRESH_TUTORIAL.md). |
+| `NUMBER_OF_PLOTS` | Top-N Kraken viral hits surfaced in the per-virus CSV (default `10`). |
 
-Optional keys:
+### Always-on stages, with tuning knobs
 
 | Key | Default | Purpose |
 |---|---|---|
-| `CLEAN` | `"FALSE"` | If `"TRUE"`, remove intermediates after the run and write `analysis_done.txt`. |
 | `CONTIG_LENGTH` | `500` | Minimum polished-contig length kept after Pilon. |
 | `PILON_MEM` | `"50G"` | JVM heap for Pilon. |
 | `MEGAHIT_MEM_FRACTION` | `0.5` | Fraction of system RAM MEGAHIT is allowed to allocate. Drop to `0.2-0.3` on memory-tight laptops. |
+| `MEGAHIT_RETRIES` | `4` | Apple Silicon MEGAHIT non-determinism mitigation: number of retry attempts before falling back to the `DUMMY_CONTIG`. Linux defaults to a single attempt. |
+| `COVERAGE_WINDOW` | `100` | Window size (bp) passed to `mosdepth --by`. Smaller values give a finer coverage trace in the report and a larger `regions.bed.gz`. |
+
+### Optional stages (config-flag gated)
+
+The table below mirrors the opt-in stage table in
+[`CLAUDE.md`](../CLAUDE.md). Every flag is parity-safe at its
+default; flipping it to its non-default value is a deliberate
+divergence from the original `virusHanter`.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `CLEAN` | `"FALSE"` | If `"TRUE"`, remove intermediates after the run and write `analysis_done.txt`. |
 | `MULTIQC` | `"TRUE"` | Emit `{batch}/multiqc_report.html` at the end of the run. |
-| `GENOMAD` | `"FALSE"` | Run geNomad alongside CheckV. Requires `GENOMAD_DB`. |
-| `GENOMAD_DB` | `""` | Path to the populated `genomad_db/` directory. See [REFERENCE_DBS.md](REFERENCE_DBS.md#sources-for-the-inputs). |
-| `COVERAGE_WINDOW` | `100` | Window size in base pairs passed to `mosdepth --by`. Smaller values give a finer coverage trace in the report and a larger `regions.bed.gz`. |
-| `DEDUPLICATE` | `"FALSE"` | Exclude PCR duplicates from the host-removed reads that feed MEGAHIT and the BWA-to-Kraken-hits coverage step. Off by default to preserve parity with the original virusHanter outputs. |
-| `QUAST` | `"FALSE"` | Run QUAST on each sample's MEGAHIT contigs and feed it to MultiQC. Currently lacks an osx-arm64 bioconda build, so on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
+| `DEDUPLICATE` | `"FALSE"` | Exclude PCR duplicates from the host-removed reads that feed assembly and the coverage step. |
+| `QUAST` | `"FALSE"` | Run QUAST per (sample, assembler) and feed each report to MultiQC. Bioconda has no `osx-arm64` build of QUAST. |
+| `GENOMAD` | `"FALSE"` | Run geNomad alongside CheckV per (sample, assembler). Requires `GENOMAD_DB`. |
+| `GENOMAD_DB` | `""` | Path to the populated `genomad_db/` directory. |
+| `GENOMAD_SPLITS` | `4` | `genomad --splits N` value. Higher reduces peak `mmseqs prefilter` memory at the cost of run time; default 4 keeps the peak under ~6 GB. Set `0` on hosts with abundant RAM to restore mmseqs' auto-split. |
+| `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/`. Set to `["MEGAHIT"]` for parity with the original `virusHanter`. |
+| `COVERAGE_SOURCES` | `["KRAKEN", "KAIJU", "BLAST"]` | Classifiers whose viral hits contribute tax_ids to the BWA reference set used by mosdepth coverage. Union of the per-classifier top-N drives reference selection. Set to `["KRAKEN"]` to recover the pre-multi-source behaviour. |
+| `COVERAGE_TOP_N` | `20` | Per-classifier cap on the number of viral hits whose tax_ids enter the BWA reference set. |
+| `TAXDUMP_NODES` | `""` | Optional path to an uncompressed NCBI `nodes.dmp`. Enables the rank filter and (when on) the genus walk-up. Built and published as part of the refresh workflow; see [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md). |
+| `COVERAGE_RANK_FILTER` | `[acellular root, realm, kingdom, subkingdom, phylum, subphylum, class, subclass, order, suborder, family, subfamily]` | NCBI rank strings that classifier hits are dropped at before they enter the coverage union. Higher-rank propagation rows have no per-tax_id sequence so they would otherwise flood `unmapped_taxids.tsv`. Requires `TAXDUMP_NODES`; set to `[]` to disable. |
+| `COVERAGE_GENUS_WALKUP` | `"TRUE"` | When a classifier hit is absent from `VIRUS_PARQUET`, walk up to its genus and substitute a representative genus reference. Tagged in the `virus_names` `sources` column with the `->genus` suffix. Requires `TAXDUMP_NODES`. |
 | `SECONDARY_HOST_INDEX` | unset | BWA prefix for a second host (e.g. mouse). Adds a second host-removal stage when set. |
 | `SECONDARY_HOST_NAME` | unset | Display name shown in the per-sample report. |
 
@@ -61,10 +80,11 @@ Each rule declares its own env in `envs/`:
 |---|---|
 | `envs/fastp.yaml` | fastp |
 | `envs/bwa.yaml` | bwa, samtools |
-| `envs/samtools.yaml` | samtools (used by `markdup_human`, `remove_host`, etc.) |
+| `envs/samtools.yaml` | samtools |
 | `envs/kraken.yaml` | kraken2 |
 | `envs/kaiju.yaml` | kaiju |
 | `envs/megahit.yaml` | megahit |
+| `envs/spades.yaml` | spades / metaspades |
 | `envs/pilon.yaml` | pilon, bwa, samtools, openjdk |
 | `envs/blastn.yaml` | blast, pandas, pyfastx |
 | `envs/checkv.yaml` | checkv |
@@ -74,6 +94,7 @@ Each rule declares its own env in `envs/`:
 | `envs/genomad.yaml` | genomad |
 | `envs/panel.yaml` | python, pandas, pyfastx, pyarrow (wrangling rules) |
 | `envs/reporthanter.yaml` | python 3.12 + pip-installed `reportHanter` from GitHub |
+| `envs/refresh.yaml` | python + pandas + pyarrow + pyfastx + curl + wget + kraken2 + kaiju (used only by the refresh workflow under `refresh/`) |
 
 Snakemake materialises an env the first time any rule that declares
 it runs. Subsequent runs reuse the cached env under
@@ -81,8 +102,15 @@ it runs. Subsequent runs reuse the cached env under
 
 ## Apple Silicon notes
 
-The driver env stays native osx-arm64. A few bioconda tools have
+The driver env stays native `osx-arm64`. A few bioconda tools have
 historical or current rough edges on this platform; see
-[../test/run_smoke.sh](../test/run_smoke.sh) for the explicit list
-of workarounds (MEGAHIT thread cap, `--no-hw-accel`, RAM-bound
-mem fraction).
+[`../test/run_smoke.sh`](../test/run_smoke.sh) for the explicit
+workarounds. The current pipeline already encodes them:
+
+- MEGAHIT runs single-threaded with `--no-hw-accel --k-min 27
+  --k-max 57`, and the retry loop catches the residual SIGSEGV /
+  SIGABRT non-determinism.
+- `GENOMAD_SPLITS: 4` keeps the embedded `mmseqs prefilter` under
+  the 18 GB system RAM ceiling typical of an Apple Silicon laptop.
+- QUAST has no `osx-arm64` bioconda build; either leave
+  `QUAST: "FALSE"` or set `CONDA_SUBDIR=osx-64`.

@@ -20,8 +20,9 @@ report and `run_information_<batch>.csv` schema of the original
 rules/
   pre_processing.smk    fastp, bwa host removal, markdup, optional dedup
   classification.smk    Kaiju, Kraken2, top-N viral hit selection
-  assembly.smk          MEGAHIT, Pilon, BLASTN, CheckV, optional QUAST
-                        and geNomad
+  assembly.smk          MEGAHIT + metaSPAdes (per-assembler wildcard),
+                        Pilon, BLASTN, CheckV, optional QUAST and
+                        geNomad
   post_processing.smk   mosdepth, generate_report, MultiQC, per-virus
                         and run-info aggregations
 scripts/
@@ -58,8 +59,9 @@ on first use.
 |---|---|---|
 | `MULTIQC` | `"TRUE"` | Workflow-level MultiQC HTML at `{batch}/multiqc_report.html`. |
 | `DEDUPLICATE` | `"FALSE"` | `remove_host` reads the markdup BAM with `-F 1024`; PCR duplicates are excluded from MEGAHIT and the coverage step. Off by default to preserve byte-identical parity. |
-| `QUAST` | `"FALSE"` | `quast_megahit` runs against each sample's MEGAHIT contigs and is fed to MultiQC. Bioconda has no `osx-arm64` build of QUAST; on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
-| `GENOMAD` | `"FALSE"` | `genomad` end-to-end runs alongside CheckV; geNomad's per-contig scores are appended as additive columns in `per_virus_metrics.csv`. Requires `GENOMAD_DB`. |
+| `QUAST` | `"FALSE"` | `quast_per_assembler` runs against each (sample, assembler) pair and the per-assembler reports are fed to MultiQC. Bioconda has no `osx-arm64` build of QUAST; on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
+| `GENOMAD` | `"FALSE"` | `genomad` end-to-end runs alongside CheckV per (sample, assembler); geNomad's per-contig scores are appended as additive columns in `per_virus_metrics.csv`. Requires `GENOMAD_DB`. |
+| `GENOMAD_SPLITS` | `4` | `genomad --splits N` value. Higher reduces peak `mmseqs prefilter` memory at the cost of run time; default 4 keeps the peak under ~6 GB on the DRRKK samples. Set `0` to restore mmseqs' auto-split. |
 | `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/...`. Defaults to both assemblers, which intentionally breaks byte-identical parity with the original `virusHanter` (see `docs/PARITY_NOTES.md`). Set `["MEGAHIT"]` to recover parity. |
 | `COVERAGE_SOURCES` | `["KRAKEN", "KAIJU", "BLAST"]` | Classifiers whose viral hits contribute taxids to the BWA reference set used by mosdepth coverage. The union of the top-N from each enabled source drives reference selection; an `unmapped_taxids.tsv` sidecar lists classified taxids missing from `VIRUS_PARQUET`. Set `["KRAKEN"]` to recover the pre-multi-source behaviour. |
 | `COVERAGE_TOP_N` | `20` | Per-classifier cap on the number of viral hits whose taxids enter the BWA reference set. Applied independently to each entry in `COVERAGE_SOURCES`. |
@@ -105,11 +107,35 @@ Apple Silicon caveats:
 
 - MEGAHIT's `_no_hw_accel count -k 21` SIGSEGVs on small inputs;
   `rules/assembly.smk` already passes `--k-min 27` on
-  `Darwin/arm64` to dodge the buggy path.
+  `Darwin/arm64` to dodge the buggy path. The retry loop (default
+  4 attempts via `MEGAHIT_RETRIES`) handles the residual
+  non-determinism.
 - A CheckV DB sourced from an external Mac volume can carry
   AppleDouble `._*.hmm` metadata files that CheckV mis-reads as
   HMMs ("80 hmmsearch tasks failed"). Strip them with
   `find /path/to/checkv-db-vX -name '._*' -delete` once.
+- geNomad's embedded `mmseqs prefilter` can OOM on
+  metaSPAdes-derived proteomes (3× larger than MEGAHIT). The
+  default `GENOMAD_SPLITS: 4` partitions the search; raise it on
+  smaller hosts.
+- `wget` on a LaCie-mounted external volume emits a non-fatal
+  `utime()` warning that some builds expose as a non-zero exit
+  code. The refresh workflow uses `curl` for the large downloads
+  to avoid the issue; mirror that pattern in any new download
+  rule.
 
 When the CheckV DB is stubbed, the smoke degrades automatically to
 `--until blastn mosdepth_kraken_hits kaiju_to_table`.
+
+## Refresh workflow
+
+`refresh/refresh_virus_parquet.smk` is a standalone Snakemake
+workflow (not part of the main pipeline DAG) that rebuilds
+`VIRUS_PARQUET` and the matching Kaiju FMI index from the same
+NCBI viral RefSeq snapshot, downloads the taxdump, and emits an
+overlap-with-Kraken2 diagnostic sidecar. Driven by
+`refresh/config.yaml`. Helpers live at
+`scripts/build_virus_parquet.py`,
+`scripts/reformat_kaiju_headers.py`,
+`scripts/compare_parquet_kraken2.py`. See
+[`docs/REFRESH_TUTORIAL.md`](docs/REFRESH_TUTORIAL.md).
