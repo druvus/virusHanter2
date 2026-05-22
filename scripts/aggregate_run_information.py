@@ -107,7 +107,18 @@ def aggregate_sample_info(
     number_reads = before.get("total_reads", 0)
 
     flagstat_proc = FlagstatProcessor()
-    flagstat_path = sample_folder / "logs" / "human_contamination_flagstat.txt"
+    # The bwa backend writes ``human_contamination_flagstat.txt``;
+    # the hostile backend writes ``hostile_contamination_flagstat.txt``
+    # in samtools-flagstat shape. Pick whichever exists so the
+    # column values stay identical regardless of host-removal tool.
+    bwa_flagstat = sample_folder / "logs" / "human_contamination_flagstat.txt"
+    hostile_flagstat = sample_folder / "logs" / "hostile_contamination_flagstat.txt"
+    if hostile_flagstat.exists():
+        flagstat_path = hostile_flagstat
+        host_removal_tool = "hostile"
+    else:
+        flagstat_path = bwa_flagstat
+        host_removal_tool = "bwa"
     flagstat_df = flagstat_proc.process(str(flagstat_path))
     flagstat_lookup = dict(zip(flagstat_df["metric"], flagstat_df["value"]))
     percent_mapped = flagstat_lookup.get("percent_mapped", 0.0)
@@ -300,6 +311,11 @@ def aggregate_sample_info(
         # numbers when QUAST is enabled. Empty / zero on runs that did
         # not enable QUAST for that assembler.
         "assemblers_used": assemblers_used,
+        # Trailing column recording which host-removal tool produced
+        # the per-sample read set ("bwa" or "hostile"). Allows
+        # downstream comparisons of duplicate / host-carryover rates
+        # across runs that switched backends.
+        "host_removal_tool": host_removal_tool,
     }
     row.update(per_asm_columns)
     return pd.DataFrame([row])

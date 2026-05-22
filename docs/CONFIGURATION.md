@@ -49,7 +49,9 @@ divergence from the original `virusHanter`.
 | `GENOMAD` | `"FALSE"` | Run geNomad alongside CheckV per (sample, assembler). Requires `GENOMAD_DB`. |
 | `GENOMAD_DB` | `""` | Path to the populated `genomad_db/` directory. |
 | `GENOMAD_SPLITS` | `4` | `genomad --splits N` value. Higher reduces peak `mmseqs prefilter` memory at the cost of run time; default 4 keeps the peak under ~6 GB. Set `0` on hosts with abundant RAM to restore mmseqs' auto-split. |
-| `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/`. Set to `["MEGAHIT"]` for parity with the original `virusHanter`. |
+| `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Choices: `MEGAHIT`, `SPAdes` (metaSPAdes `--meta`), `rnaviralSPAdes` (SPAdes `--rnaviral`, tuned for RNA virus libraries — recommend adding it as a third parallel assembler on RNA-virus-heavy samples). Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/`. Set to `["MEGAHIT"]` for parity with the original `virusHanter`. |
+| `HOST_REMOVAL` | `"bwa"` | Host-removal backend. `bwa` runs `bwa mem -k 26` against `HUMAN_INDEX` (parity default). `hostile` (Bede et al.) runs minimap2 against a bundled T2T-CHM13 + alt + decoy human reference and catches telomeric, centromeric and segmental-duplication host reads that GRCh38-based BWA misses. The active backend's name lands in the trailing `host_removal_tool` column of `run_information_<batch>.csv`. |
+| `HOSTILE_INDEX` | `""` | Optional path to a pre-downloaded hostile T2T-CHM13 index directory. Only consulted when `HOST_REMOVAL: "hostile"`. Leave empty to let hostile manage its own cache on first use. |
 | `COVERAGE_SOURCES` | `["KRAKEN", "KAIJU", "BLAST"]` | Classifiers whose viral hits contribute tax_ids to the BWA reference set used by mosdepth coverage. Union of the per-classifier top-N drives reference selection. Set to `["KRAKEN"]` to recover the pre-multi-source behaviour. |
 | `COVERAGE_TOP_N` | `20` | Per-classifier cap on the number of viral hits whose tax_ids enter the BWA reference set. |
 | `TAXDUMP_NODES` | `""` | Optional path to an uncompressed NCBI `nodes.dmp`. Enables the rank filter and (when on) the genus walk-up. Built and published as part of the refresh workflow; see [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md). |
@@ -95,6 +97,7 @@ Each rule declares its own env in `envs/`:
 | `envs/panel.yaml` | python, pandas, pyfastx, pyarrow (wrangling rules) |
 | `envs/reporthanter.yaml` | python 3.12 + pip-installed `reportHanter` from GitHub |
 | `envs/refresh.yaml` | python + pandas + pyarrow + pyfastx + curl + wget + kraken2 + kaiju (used only by the refresh workflow under `refresh/`) |
+| `envs/hostile.yaml` | hostile + minimap2 + samtools (only used when `HOST_REMOVAL: "hostile"`) |
 
 Snakemake materialises an env the first time any rule that declares
 it runs. Subsequent runs reuse the cached env under

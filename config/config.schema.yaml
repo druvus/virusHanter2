@@ -202,7 +202,7 @@ properties:
     type: array
     items:
       type: string
-      enum: ["MEGAHIT", "SPAdes"]
+      enum: ["MEGAHIT", "SPAdes", "rnaviralSPAdes"]
     minItems: 1
     uniqueItems: true
     default: ["MEGAHIT", "SPAdes"]
@@ -213,9 +213,43 @@ properties:
       accumulate under
       `{RESULTS_FOLDER}/{batch}/{sample}/{assembler}/`. The report
       and per-virus aggregation combine the per-assembler tables
-      and add an `assembler` column. To recover byte-identical
-      parity with the original `virusHanter`, set this to
-      ["MEGAHIT"].
+      and add an `assembler` column.
+
+      Choices:
+        - MEGAHIT — fast k-mer-step metagenome assembler.
+        - SPAdes — metaSPAdes `--meta`, the default for mixed
+          DNA/RNA viral metagenomes.
+        - rnaviralSPAdes — SPAdes `--rnaviral`, tuned for the
+          coverage variance and large insert-size distributions
+          typical of RNA virus libraries. Recommended as a third
+          parallel assembler for samples enriched in RNA viruses
+          (orthomyxo, paramyxo, picornaviridae).
+
+      To recover byte-identical parity with the original
+      `virusHanter`, set this to ["MEGAHIT"].
+  HOST_REMOVAL:
+    type: string
+    enum: ["bwa", "hostile"]
+    default: "bwa"
+    description: |
+      Host-removal backend. `bwa` (parity default) runs
+      `bwa mem -k 26` against `HUMAN_INDEX` and extracts unmapped
+      pairs via `samtools view -f 12`. `hostile` runs the Bede
+      et al. hostile tool against the bundled T2T-CHM13 + alt +
+      decoy human reference; catches telomeric, centromeric and
+      segmental-duplication host reads that GRCh38-based BWA
+      misses. Requires `envs/hostile.yaml` and (optionally)
+      `HOSTILE_INDEX` pointing at a pre-downloaded T2T-CHM13
+      bundle; if empty, hostile downloads to its own cache on
+      first use.
+  HOSTILE_INDEX:
+    type: string
+    default: ""
+    description: |
+      Path to a pre-downloaded hostile T2T-CHM13 index directory.
+      Only consulted when `HOST_REMOVAL: "hostile"`. Leave empty
+      to let hostile manage its own cache (slower first run,
+      simpler config).
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.

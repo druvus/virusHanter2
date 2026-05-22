@@ -55,8 +55,8 @@ def assembler_contigs(wildcards):
 # Rule: De novo assembly with MEGAHIT
 rule megahit:
     input:
-        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
-        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
     output:
         contigs=f"{RESULT_FOLDER}/{{sample}}/MEGAHIT/{{sample}}.contigs.fa",
     params:
@@ -180,8 +180,8 @@ rule megahit:
 # not need to special-case an absent SPAdes output.
 rule metaspades:
     input:
-        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
-        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
     output:
         contigs=f"{RESULT_FOLDER}/{{sample}}/SPAdes/{{sample}}.contigs.fa",
     params:
@@ -239,6 +239,75 @@ rule metaspades:
         )
 
 
+# Rule: De novo assembly with rnaviralSPAdes
+#
+# SPAdes variant tuned for RNA viral libraries: handles the
+# coverage variance and large insert-size distributions typical
+# of host-depleted RNA virus samples better than `--meta` does.
+# Mirrors the `metaspades` rule's command shape and dummy-contig
+# fallback so the downstream {assembler}-wildcard chain stays
+# uniform.
+rule rnaviralspades:
+    input:
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
+    output:
+        contigs=f"{RESULT_FOLDER}/{{sample}}/rnaviralSPAdes/{{sample}}.contigs.fa",
+    params:
+        out_dir=f"{RESULT_FOLDER}/{{sample}}/rnaviralSPAdes",
+    threads: THREADS
+    resources:
+        mem_mb=32000,
+        runtime=360,
+    log:
+        f"{RESULT_FOLDER}/{{sample}}/logs/rnaviralspades.log",
+    conda:
+        "../envs/spades.yaml"
+    run:
+        import subprocess
+
+        shell("rm -rf {params.out_dir}")
+        shell("mkdir -p {params.out_dir}")
+
+        mem_gb = max(8, int(resources.mem_mb / 1024))
+
+        try:
+            shell(
+                "spades.py --rnaviral "
+                "-1 {input.r1} -2 {input.r2} "
+                "-o {params.out_dir} "
+                f"-t {threads} "
+                f"-m {mem_gb} "
+                "--only-assembler "
+                "> {log} 2>&1"
+            )
+        except subprocess.CalledProcessError:
+            # rnaviralSPAdes shares metaSPAdes' "refuses too-small
+            # libraries" failure mode. The fallback writes the dummy
+            # contig so Pilon / BLASTN / CheckV still have an input.
+            pass
+
+        # rnaviralSPAdes writes the assembled transcripts to
+        # ``transcripts.fasta`` rather than ``contigs.fasta``; fall
+        # back to ``contigs.fasta`` if a future SPAdes release
+        # renames the file.
+        for candidate in ("transcripts.fasta", "contigs.fasta"):
+            src = Path(params.out_dir) / candidate
+            if src.exists() and src.stat().st_size > 0:
+                shell(f"mv {src} {{output.contigs}}")
+                break
+        else:
+            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
+            with open(output.contigs, "w") as f:
+                f.write(">DUMMY_CONTIG\n")
+                f.write("TTAACCTTGG" * 20 + "\n")
+
+        shell(
+            "ls -d -1 {params.out_dir}/* 2>/dev/null "
+            "| grep -v .contigs.fa | xargs rm -rf || true"
+        )
+
+
 # Rule: QUAST assembly assessment on the raw assembler contigs.
 #
 # Reports N50, largest contig, total assembled length, GC% and other
@@ -272,8 +341,8 @@ rule quast_per_assembler:
 rule pilon:
     input:
         contigs=assembler_contigs,
-        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
-        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
     output:
         contigs_bam=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_contigs.bam",
         improved_contigs=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_improved_contigs.fasta",

@@ -31,8 +31,8 @@ def _kaiju_nodes(wildcards):
 # Rule: Kaiju classification
 rule kaiju:
     input:
-        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
-        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
         fmi=_kaiju_fmi,
         nodes=_kaiju_nodes,
     output:
@@ -78,8 +78,8 @@ rule kaiju_to_table:
 # Rule: Kraken2 classification
 rule kraken:
     input:
-        r1=lambda wildcards: rules.bam_to_fastq_human.output.r1 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r1,
-        r2=lambda wildcards: rules.bam_to_fastq_human.output.r2 if not SECONDARY_HOST_OR_NOT else rules.bam_to_fastq_secondary.output.r2,
+        r1=lambda wildcards: host_removed_r1(wildcards),
+        r2=lambda wildcards: host_removed_r2(wildcards),
     output:
         kraken_report=f"{RESULT_FOLDER}/{{sample}}/KRAKEN/{{sample}}.kraken.report",
     params:

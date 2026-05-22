@@ -13,17 +13,24 @@ contig-producing rule below the de novo assemblers runs once per
 ### Pre-processing — `rules/pre_processing.smk`
 
 1. **`fastp`** — quality trim/filter the paired-end input.
-2. **`bwa_human`** — map trimmed reads to the human host
-   (`bwa mem -k 26`).
-3. **`remove_host`** — `samtools flagstat` + extract unmapped pairs.
-4. **`bam_to_fastq_human`** — write host-unmapped pairs back to
-   FASTQ.
-5. **`markdup_human`** — `samtools markdup -s` on the host BAM.
-   Stats-only side channel; does not change the un-marked BAM that
-   downstream rules read.
-6. **`bwa_secondary_host`** + **`remove_secondary_host`** +
-   **`bam_to_fastq_secondary`** — optional second host removal when
-   `SECONDARY_HOST_INDEX` is set.
+2. **Host removal** — one of two backends, selected by
+   `config[HOST_REMOVAL]`:
+   - **`bwa`** (default, parity-safe): `bwa_human` →
+     `markdup_human` (markdup stats only) → `remove_host`
+     (flagstat + `samtools view -f 12` to extract pairs where
+     both reads are unmapped to the human host) →
+     `bam_to_fastq_human` (paired FASTQ).
+   - **`hostile`**: `hostile_human` runs Bede et al.'s hostile
+     against the bundled T2T-CHM13 reference (more thorough
+     for telomeric / pericentromeric host reads). Produces the
+     same paired FASTQ outputs plus a flagstat-shape stats
+     file the report layer parses.
+3. Downstream rules consume the host-removed FASTQ via
+   `host_removed_r1` / `host_removed_r2` helper functions that
+   resolve to the active backend's outputs.
+4. **`bwa_secondary_host`** + **`remove_secondary_host`** +
+   **`bam_to_fastq_secondary`** — optional second host removal
+   when `SECONDARY_HOST_INDEX` is set.
 
 ### Classification — `rules/classification.smk`
 
@@ -40,10 +47,14 @@ Outputs land under `{sample}/{assembler}/...`.
 
 9. **`megahit`** — de novo assembly. Apple Silicon retry loop
    (`MEGAHIT_RETRIES`) handles the bioconda `osx-arm64`
-   non-determinism; falls back to a `DUMMY_CONTIG` when every retry
-   crashes so downstream rules always have an input.
-10. **`metaspades`** — de novo assembly via metaSPAdes. Mirrors
-    the dummy-contig fallback on assembly refusal.
+   non-determinism; falls back to a `DUMMY_CONTIG` when every
+   retry crashes so downstream rules always have an input.
+10. **`metaspades`** — de novo assembly via metaSPAdes
+    (`--meta`). Mirrors the dummy-contig fallback on assembly
+    refusal.
+11. **`rnaviralspades`** *(optional)* — SPAdes `--rnaviral` for
+    RNA-virus-tuned assembly. Activated by adding
+    `"rnaviralSPAdes"` to `config[ASSEMBLERS]`.
 11. **`pilon`** + **`wrangle_pilon`** — short-read polishing, then
     length-filter to `CONTIG_LENGTH`. `wrangle_pilon` stamps an
     `assembler` column on the per-contig CSV so every downstream

@@ -159,6 +159,11 @@ while keeping the row count in the same order of magnitude.
 - `nucl_gb.accession2taxid.gz`: download from
   `https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/`
   along with its `.md5` for verification.
+- hostile T2T-CHM13 index (only when `HOST_REMOVAL: "hostile"`):
+  hostile manages its own cache on first use, or pre-download with
+  `hostile fetch --name human-t2t-hla --out /Volumes/LaCie/REGIONEN/ref_dbs/HOSTILE/`
+  and point `HOSTILE_INDEX` at that directory. The bundle includes
+  T2T-CHM13 plus alt haplotypes and decoy contigs (~1 GB).
 - Kraken2 indices: download from
   `https://genome-idx.s3.amazonaws.com/kraken/` and extract in
   place. The pluspf 2024-01-12 tarball is ~63 GB compressed and
