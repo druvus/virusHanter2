@@ -82,9 +82,11 @@ run_full() {
         echo "[smoke] Apple Silicon: CONDA_SUBDIR=osx-64 set for QUAST env materialisation"
     fi
 
-    # Default to MEGAHIT + metaSPAdes — the production default. Override
-    # by exporting SMOKE_ASSEMBLERS before invoking this script.
-    local assemblers=("MEGAHIT" "SPAdes")
+    # Mirror the smoke config's ASSEMBLERS list. The smoke config
+    # exercises the three-assembler path (MEGAHIT + metaSPAdes +
+    # rnaviralSPAdes); the assertion loop below picks up every
+    # active assembler's QUAST output.
+    local assemblers=("MEGAHIT" "SPAdes" "rnaviralSPAdes")
 
     if [[ "$checkv_ready" == "1" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"

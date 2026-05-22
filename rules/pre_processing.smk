@@ -327,19 +327,21 @@ rule hostile_human:
         # and aggregate_run_information) keep working unchanged.
         # hostile's JSON reports `reads_in` and `reads_out`; flagstat
         # convention is "paired in sequencing" and "with itself and
-        # mate mapped" referring to the host-aligned pairs.
+        # mate mapped" referring to the host-aligned pairs. The
+        # newline characters are doubly escaped so the outer
+        # Snakefile (Python) parse leaves them as `\\n`, bash passes
+        # them through verbatim, and the inner `python -c "..."` parse
+        # finally interprets them as real newlines.
         python -c "
-import json, sys
+import json
 stats = json.load(open('{output.stats_json}'))
-# hostile.clean returns a list of one dict per sample; take the
-# first entry.
 s = stats[0] if isinstance(stats, list) else stats
 reads_in = int(s.get('reads_in', 0))
 reads_out = int(s.get('reads_out', 0))
 mapped = reads_in - reads_out
 with open('{output.flagstat}', 'w') as fh:
-    fh.write(f'{{reads_in}} + 0 paired in sequencing\n')
-    fh.write(f'{{mapped}} + 0 with itself and mate mapped\n')
+    fh.write(str(reads_in) + ' + 0 paired in sequencing\\n')
+    fh.write(str(mapped) + ' + 0 with itself and mate mapped\\n')
 " >> {log} 2>&1
         """
 

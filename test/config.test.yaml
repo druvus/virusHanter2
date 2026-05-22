@@ -38,3 +38,9 @@ DEDUPLICATE: "FALSE"
 # CONDA_SUBDIR=osx-64 just for the QUAST env's materialisation.
 # Flip to "FALSE" if you want to skip QUAST entirely.
 QUAST: "TRUE"
+
+# Exercise the three-assembler path so the smoke validates the
+# rnaviralSPAdes rule + per-assembler QUAST + per-assembler
+# BLAST / CheckV chain wiring. Drop "rnaviralSPAdes" from this list
+# to revert to the default two-assembler smoke.
+ASSEMBLERS: ["MEGAHIT", "SPAdes", "rnaviralSPAdes"]
