@@ -124,8 +124,23 @@ RUN_QUAST_WF = config.get("QUAST", "FALSE") == "TRUE"
 # `{RESULT_FOLDER}/{sample}/{assembler}/`. Default is both MEGAHIT
 # and metaSPAdes. To recover byte-identical parity with the
 # original virusHanter, set ASSEMBLERS: ["MEGAHIT"] in config.
-ASSEMBLERS = list(config.get("ASSEMBLERS", ["MEGAHIT", "SPAdes"]))
-_VALID_ASSEMBLERS = {"MEGAHIT", "SPAdes", "rnaviralSPAdes"}
+ASSEMBLERS = list(
+    config.get("ASSEMBLERS", ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"])
+)
+_VALID_ASSEMBLERS = {"MEGAHIT", "metaSPAdes", "rnaviralSPAdes"}
+# Migration: the older "SPAdes" alias was renamed to "metaSPAdes"
+# (it always invoked `spades.py --meta`; the new name is explicit
+# about that). Catch the deprecated entry with a clear error so
+# operators with old configs see exactly what to change.
+if "SPAdes" in ASSEMBLERS:
+    raise WorkflowError(
+        "config[ASSEMBLERS] contains the deprecated alias 'SPAdes'. "
+        "Rename it to 'metaSPAdes' (the rule has always run "
+        "`spades.py --meta`; the new name spells that out). "
+        "Existing on-disk results under {sample}/SPAdes/ are still "
+        "readable; rename or copy them to {sample}/metaSPAdes/ if "
+        "you want to keep them."
+    )
 _invalid = [a for a in ASSEMBLERS if a not in _VALID_ASSEMBLERS]
 if _invalid:
     raise WorkflowError(

@@ -43,4 +43,4 @@ QUAST: "TRUE"
 # rnaviralSPAdes rule + per-assembler QUAST + per-assembler
 # BLAST / CheckV chain wiring. Drop "rnaviralSPAdes" from this list
 # to revert to the default two-assembler smoke.
-ASSEMBLERS: ["MEGAHIT", "SPAdes", "rnaviralSPAdes"]
+ASSEMBLERS: ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]

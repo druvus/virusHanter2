@@ -202,10 +202,10 @@ properties:
     type: array
     items:
       type: string
-      enum: ["MEGAHIT", "SPAdes", "rnaviralSPAdes"]
+      enum: ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]
     minItems: 1
     uniqueItems: true
-    default: ["MEGAHIT", "SPAdes"]
+    default: ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]
     description: |
       List of de novo assemblers to run on the host-removed read pool.
       Each assembler runs independently through Pilon, BLASTN, CheckV
@@ -217,16 +217,21 @@ properties:
 
       Choices:
         - MEGAHIT — fast k-mer-step metagenome assembler.
-        - SPAdes — metaSPAdes `--meta`, the default for mixed
+        - metaSPAdes — SPAdes `--meta`, designed for mixed
           DNA/RNA viral metagenomes.
         - rnaviralSPAdes — SPAdes `--rnaviral`, tuned for the
           coverage variance and large insert-size distributions
-          typical of RNA virus libraries. Recommended as a third
-          parallel assembler for samples enriched in RNA viruses
+          typical of RNA virus libraries. Useful in addition to
+          metaSPAdes for samples enriched in RNA viruses
           (orthomyxo, paramyxo, picornaviridae).
 
-      To recover byte-identical parity with the original
-      `virusHanter`, set this to ["MEGAHIT"].
+      The default runs all three; reduce the list when you do not
+      want one (e.g. `["MEGAHIT"]` to recover byte-identical
+      parity with the original `virusHanter`).
+
+      The deprecated alias `"SPAdes"` is rejected at workflow load
+      with a migration hint; rename it to `"metaSPAdes"` in your
+      config.
   HOST_REMOVAL:
     type: string
     enum: ["bwa", "hostile"]

@@ -51,6 +51,138 @@ def _databases_used_string(cfg: dict) -> str:
     return ";".join(parts)
 
 
+def _db_provenance_dates(cfg: dict) -> dict[str, str]:
+    """Resolve a per-DB ISO-date string for each configured reference.
+
+    The intent is a one-line audit of "did all the classifier DBs
+    come from the same snapshot?". The function prefers:
+
+      1. A ``build_stats.json`` sidecar next to ``VIRUS_PARQUET``
+         (carries an explicit ``build_date_utc`` field that the
+         refresh workflow writes).
+      2. The on-disk mtime of a representative file under each DB
+         directory / prefix.
+
+    Returns an ordered mapping of ``KEY -> 'YYYY-MM-DD'``.
+    """
+    import datetime as _dt
+    import json as _json
+
+    out: dict[str, str] = {}
+
+    def _mtime(p: Path) -> str:
+        try:
+            ts = p.stat().st_mtime
+            return _dt.datetime.fromtimestamp(ts, _dt.UTC).date().isoformat()
+        except OSError:
+            return ""
+
+    # VIRUS_PARQUET prefers the sidecar; falls back to file mtime.
+    parquet_path = cfg.get("VIRUS_PARQUET", "")
+    if parquet_path:
+        parquet = Path(parquet_path)
+        sidecar = parquet.with_suffix("").with_suffix("").with_name(
+            parquet.stem + "_build_stats.json"
+        )
+        if sidecar.is_file():
+            try:
+                with sidecar.open() as fh:
+                    data = _json.load(fh)
+                build_date = data.get("build_date_utc", "")
+                if build_date:
+                    out["VIRUS_PARQUET"] = str(build_date)[:10]
+            except (OSError, ValueError):
+                pass
+        if "VIRUS_PARQUET" not in out and parquet.is_file():
+            out["VIRUS_PARQUET"] = _mtime(parquet)
+
+    # Directory-backed DBs: pick a representative inner file (the
+    # one mosdepth-like consumers actually read at run time) so the
+    # mtime reflects the last DB rebuild rather than the directory
+    # touch.
+    candidates: dict[str, list[str]] = {
+        "KAIJU_DB": ["*.fmi", "nodes.dmp"],
+        "KRAKEN_DB": ["taxo.k2d", "hash.k2d"],
+        "CHECKV_DB": ["genome_db/checkv_reps.dmnd", "checkv-db-v*.tsv"],
+        "GENOMAD_DB": ["names.dmp", "genomad_db.dmnd"],
+    }
+    for key, patterns in candidates.items():
+        root = cfg.get(key, "")
+        if not root:
+            continue
+        rp = Path(root)
+        if not rp.is_dir():
+            continue
+        picked: Path | None = None
+        for pattern in patterns:
+            matches = sorted(rp.glob(pattern))
+            if matches:
+                picked = matches[0]
+                break
+        if picked is None:
+            picked = rp
+        date = _mtime(picked)
+        if date:
+            out[key] = date
+
+    # Prefix-backed DBs (BWA / BLAST): probe a sibling file with the
+    # appropriate suffix.
+    prefix_keys: dict[str, list[str]] = {
+        "HUMAN_INDEX": [".bwt", ".0123"],
+        "BLASTN_DB": [".nhr", ".nal"],
+        "SECONDARY_HOST_INDEX": [".bwt", ".0123"],
+    }
+    for key, suffixes in prefix_keys.items():
+        prefix = cfg.get(key, "")
+        if not prefix:
+            continue
+        for suffix in suffixes:
+            probe = Path(prefix + suffix)
+            if probe.exists():
+                date = _mtime(probe)
+                if date:
+                    out[key] = date
+                break
+
+    # TAXDUMP_NODES is a single file when configured.
+    taxdump = cfg.get("TAXDUMP_NODES", "")
+    if taxdump:
+        path = Path(taxdump)
+        if path.is_file():
+            out["TAXDUMP_NODES"] = _mtime(path)
+
+    return out
+
+
+def _databases_provenance_string(cfg: dict) -> str:
+    """Serialise the per-DB build dates as a semicolon-delimited
+    ``KEY=YYYY-MM-DD`` cell, paralleling ``_databases_used_string``.
+    Empty dates are dropped so the cell remains compact.
+    """
+    dates = _db_provenance_dates(cfg)
+    return ";".join(f"{k}={v}" for k, v in dates.items() if v)
+
+
+def _databases_provenance_span_days(cfg: dict) -> int:
+    """Return the span in days between the oldest and newest DB
+    build dates. Useful for surfacing the cross-DB coordination
+    state to the operator. Returns 0 when fewer than two dates can
+    be resolved.
+    """
+    import datetime as _dt
+
+    dates = _db_provenance_dates(cfg)
+    parsed: list[_dt.date] = []
+    for value in dates.values():
+        try:
+            parsed.append(_dt.date.fromisoformat(value))
+        except ValueError:
+            continue
+    if len(parsed) < 2:
+        return 0
+    return (max(parsed) - min(parsed)).days
+
+
 def _parse_quast_report(report_tsv: Path) -> dict[str, float | int]:
     """Pull n_contigs and N50 out of a QUAST ``report.tsv``.
 
@@ -87,6 +219,8 @@ def aggregate_sample_info(
     sample_folder: Path,
     *,
     databases_used: str = "",
+    databases_provenance: str = "",
+    databases_span_days: int = 0,
     reporthanter_version: str = "",
     assemblers: list[str] | None = None,
 ) -> pd.DataFrame:
@@ -303,6 +437,16 @@ def aggregate_sample_info(
         # blobs. Both columns are constant within a batch but vary
         # across batches and across DB / reporthanter refreshes.
         "databases_used": databases_used,
+        # `databases_provenance` carries one `KEY=YYYY-MM-DD` per
+        # configured DB (from each DB's representative-file mtime
+        # or — for VIRUS_PARQUET — the explicit `build_date_utc` in
+        # its build_stats.json sidecar). `databases_span_days` is
+        # the span between the oldest and newest of those dates;
+        # >180 means classifier DBs likely came from divergent
+        # snapshots and the cross-DB consistency the refresh
+        # workflow assumes is no longer guaranteed.
+        "databases_provenance": databases_provenance,
+        "databases_span_days": databases_span_days,
         "reporthanter_version": reporthanter_version,
         # Trailing multi-assembler diagnostics. `assemblers_used` is a
         # semicolon-delimited list of assemblers run for this sample;
@@ -327,7 +471,19 @@ def main() -> None:
     results_folder = Path(sm.params.results_folder)
     samples = [Path(report).parent.parent.name for report in sm.input.reports]
 
-    databases_used = _databases_used_string(dict(sm.config))
+    cfg = dict(sm.config)
+    databases_used = _databases_used_string(cfg)
+    databases_provenance = _databases_provenance_string(cfg)
+    databases_span_days = _databases_provenance_span_days(cfg)
+    if databases_span_days > 180:
+        print(
+            "[aggregate_run_information] WARNING: reference DB build "
+            f"dates span {databases_span_days} days "
+            f"({databases_provenance}); cross-DB taxonomy may be out "
+            "of sync. Re-run refresh/refresh_virus_parquet.smk to "
+            "rebuild VIRUS_PARQUET and KAIJU_DB from a current "
+            "snapshot."
+        )
     reporthanter_version = getattr(reporthanter, "__version__", "")
     assemblers = list(sm.params.get("assemblers", ["MEGAHIT"]))
 
@@ -335,6 +491,8 @@ def main() -> None:
         aggregate_sample_info(
             results_folder / sample,
             databases_used=databases_used,
+            databases_provenance=databases_provenance,
+            databases_span_days=databases_span_days,
             reporthanter_version=reporthanter_version,
             assemblers=assemblers,
         )

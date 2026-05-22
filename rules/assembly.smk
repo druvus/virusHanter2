@@ -183,9 +183,9 @@ rule metaspades:
         r1=lambda wildcards: host_removed_r1(wildcards),
         r2=lambda wildcards: host_removed_r2(wildcards),
     output:
-        contigs=f"{RESULT_FOLDER}/{{sample}}/SPAdes/{{sample}}.contigs.fa",
+        contigs=f"{RESULT_FOLDER}/{{sample}}/metaSPAdes/{{sample}}.contigs.fa",
     params:
-        out_dir=f"{RESULT_FOLDER}/{{sample}}/SPAdes",
+        out_dir=f"{RESULT_FOLDER}/{{sample}}/metaSPAdes",
     threads: THREADS
     resources:
         mem_mb=32000,

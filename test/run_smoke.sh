@@ -86,7 +86,7 @@ run_full() {
     # exercises the three-assembler path (MEGAHIT + metaSPAdes +
     # rnaviralSPAdes); the assertion loop below picks up every
     # active assembler's QUAST output.
-    local assemblers=("MEGAHIT" "SPAdes" "rnaviralSPAdes")
+    local assemblers=("MEGAHIT" "metaSPAdes" "rnaviralSPAdes")
 
     if [[ "$checkv_ready" == "1" ]]; then
         echo "[smoke] CheckV DB present; running full pipeline"
