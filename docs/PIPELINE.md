@@ -124,7 +124,7 @@ is the basename of `SAMPLES`.
 | `{ASSEMBLER}/BLASTN/<sample>.contigs.blastn.csv` | best-hit annotation. |
 | `{ASSEMBLER}/CHECKV/<sample>.contamination.tsv`, `<sample>.merged.csv` | CheckV call + BLASTN+CheckV inner join. |
 | `{ASSEMBLER}/GENOMAD/<sample>_improved_contigs_summary/<sample>_improved_contigs_virus_summary.tsv` | only when `GENOMAD: "TRUE"`. |
-| `{ASSEMBLER}/QUAST/report.tsv` | only when `QUAST: "TRUE"`. |
+| `{ASSEMBLER}/QUAST/report.tsv` | only when `QUAST: "TRUE"`. Rendered as an "Assembly (QUAST)" sub-tab under the report's "Classification of Contigs" section (alongside the per-assembler BLAST table and the optional geNomad summary), since QUAST measures the assembler's contigs rather than the host alignment. |
 | `BWA_KRAKEN/<sample>_kraken.bam`, `kraken_top_viruses.fasta`, `kraken_top_virus_names.tsv`, `unmapped_taxids.tsv` | multi-source reference set, sidecar with `sources` column, audit list of classifier hits without a parquet reference. |
 | `MOSDEPTH/<sample>.mosdepth.summary.txt`, `.regions.bed.gz`, `.thresholds.bed.gz` | numeric coverage (drives the per-reference traces in the HTML report). |
 | `REPORT/<sample>.html` | per-sample interactive report. |
