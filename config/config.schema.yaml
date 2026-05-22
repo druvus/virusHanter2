@@ -246,10 +246,17 @@ properties:
     type: string
     default: ""
     description: |
-      Path to a pre-downloaded hostile T2T-CHM13 index directory.
-      Only consulted when `HOST_REMOVAL: "hostile"`. Leave empty
-      to let hostile manage its own cache (slower first run,
-      simpler config).
+      Either a path to a pre-downloaded hostile index directory
+      or the bare name of a hostile-managed index (e.g.
+      ``human-t2t-hla.rs-viral-202401_ml-phage-202401``). Only
+      consulted when `HOST_REMOVAL: "hostile"`. When empty, the
+      rule passes
+      `--index human-t2t-hla.rs-viral-202401_ml-phage-202401`,
+      hostile's masked variant that preserves reads from
+      endogenous retroviruses, phages and host-embedded viral
+      elements — the reads a viral metagenomics pipeline must
+      keep. The bare `human-t2t-hla` index drops those reads as
+      host; only override if you have a specific reason.
   SECONDARY_HOST_INDEX:
     type: string
     description: Optional BWA index for a secondary host.

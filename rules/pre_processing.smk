@@ -277,8 +277,18 @@ rule hostile_human:
         stats_json=f"{RESULT_FOLDER}/{{sample}}/hostile/hostile_stats.json",
     params:
         out_dir=f"{RESULT_FOLDER}/{{sample}}/hostile",
+        # Default to the viral-mask + phage-mask T2T-CHM13 index.
+        # The bare `human-t2t-hla` index would filter reads from
+        # endogenous retroviruses, phages and other host-embedded
+        # viral elements as host — exactly the reads a viral
+        # metagenomics pipeline must preserve. The masked variant
+        # leaves the human genome intact except for those regions
+        # that align to a curated viral / phage reference, so the
+        # filter remains specific to the true host backbone.
         index_arg=lambda wildcards: (
-            f"--index {HOSTILE_INDEX}" if HOSTILE_INDEX else ""
+            f"--index {HOSTILE_INDEX}"
+            if HOSTILE_INDEX
+            else "--index human-t2t-hla.rs-viral-202401_ml-phage-202401"
         ),
     threads: THREADS
     resources:

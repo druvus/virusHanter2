@@ -160,10 +160,23 @@ while keeping the row count in the same order of magnitude.
   `https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/`
   along with its `.md5` for verification.
 - hostile T2T-CHM13 index (only when `HOST_REMOVAL: "hostile"`):
-  hostile manages its own cache on first use, or pre-download with
-  `hostile fetch --name human-t2t-hla --out /Volumes/LaCie/REGIONEN/ref_dbs/HOSTILE/`
-  and point `HOSTILE_INDEX` at that directory. The bundle includes
-  T2T-CHM13 plus alt haplotypes and decoy contigs (~1 GB).
+  the default is the masked variant
+  `human-t2t-hla.rs-viral-202401_ml-phage-202401`, which is
+  T2T-CHM13 + HLA alts with viral / phage regions masked so a
+  read from an endogenous retrovirus or a phage-related host
+  element survives the filter (the bare `human-t2t-hla` index
+  would drop those reads as host — wrong for a viral
+  metagenomics pipeline). hostile manages the cache on first
+  use, or pre-download with
+
+  ```bash
+  hostile index fetch \
+      --name human-t2t-hla.rs-viral-202401_ml-phage-202401 \
+      --out /Volumes/LaCie/REGIONEN/ref_dbs/HOSTILE/
+  ```
+
+  and point `HOSTILE_INDEX` at that directory. The bundle is
+  ~2 GB.
 - Kraken2 indices: download from
   `https://genome-idx.s3.amazonaws.com/kraken/` and extract in
   place. The pluspf 2024-01-12 tarball is ~63 GB compressed and
