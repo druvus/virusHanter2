@@ -30,9 +30,9 @@ viral RefSeq snapshot, downloads the matching taxdump
 (`nodes.dmp` + `names.dmp`) and pulls the production Kraken2
 viral tarball, then emits an overlap-with-Kraken2 sidecar so the
 operator can see at a glance which tax_ids are covered by which
-classifier. BLAST refresh is documented but stays manual because
-NCBI publishes pre-built BLAST viral DBs that need only
-`update_blastdb.pl`.
+classifier. The workflow also drives `update_blastdb.pl` so the
+viral BLAST DB tarballs share the same snapshot as the parquet
+and the Kaiju FMI; no separate manual step is required.
 
 ## What you need before you start
 
@@ -107,6 +107,18 @@ sequence is:
    call `kraken2-inspect` against the configured production
    Kraken2 DB and emit `all_viruses_vs_kraken2.tsv` next to the
    parquet, plus add overlap counters to `build_stats.json`.
+7. **Refresh the BLAST viral DB tarballs** via
+   `update_blastdb.pl` (BLAST+ ships the script). Fetches
+   `ref_viruses_rep_genomes`, `mito_rna_db` and `taxdb` from
+   NCBI's pre-built tarballs into a sibling directory next to the
+   parquet (`blast_refseq_viral/`), writes a `viral_rna_mito.nal`
+   alias so the main pipeline's `BLASTN_DB` points at a single
+   prefix querying both viral and mito/rRNA references, and
+   records each tarball's fetch date in a `snapshot.tsv` manifest
+   for the cross-DB-coordination audit. This rule supersedes the
+   previously-manual BLAST refresh step, so all four classifier
+   DBs (Kraken2, Kaiju, BLAST, taxdump-driven parquet) now share
+   the same snapshot.
 
 ## Expected outputs
 
@@ -118,10 +130,16 @@ After a successful refresh the parquet's directory looks like:
 ├── all_viruses_build_stats.json
 ├── all_viruses_vs_kraken2.tsv        (one row per tax_id; ~1 MB)
 ├── nodes.dmp                         (~215 MB)
-└── kaiju_refseq_viral/
-    ├── kaiju_refseq_viral.fmi        (~250 MB)
-    ├── nodes.dmp
-    └── names.dmp
+├── kaiju_refseq_viral/
+│   ├── kaiju_refseq_viral.fmi        (~250 MB)
+│   ├── nodes.dmp
+│   └── names.dmp
+└── blast_refseq_viral/
+    ├── viral_rna_mito.nal             (the alias the main pipeline points at)
+    ├── ref_viruses_rep_genomes.*      (BLAST index files from NCBI's tarball)
+    ├── mito_rna_db.*                  (BLAST index files from NCBI's tarball)
+    ├── taxdb.bti, taxdb.btd           (BLAST taxonomy lookup)
+    └── snapshot.tsv                   (one row per tarball: name + fetch UTC)
 ```
 
 `build_stats.json` records:
@@ -162,23 +180,30 @@ snakemake --sdm conda --cores 4 \
     --forcerun bwa_align_to_kraken_hits kaiju
 ```
 
-## BLAST viral DB refresh (manual)
+## BLAST viral DB refresh (now automated)
 
-NCBI publishes the BLAST viral DBs as pre-built tarballs.
-Refresh them with the `update_blastdb.pl` script from the
-BLAST+ toolkit:
+The `refresh_blast` rule drives `update_blastdb.pl` against
+NCBI's pre-built tarballs (`ref_viruses_rep_genomes`,
+`mito_rna_db`, `taxdb`) and publishes them next to the parquet
+under `blast_refseq_viral/`, with a generated
+`viral_rna_mito.nal` alias the main pipeline's `BLASTN_DB`
+points at. The rule also writes a `snapshot.tsv` manifest so
+the operator can audit at a glance whether the BLAST refresh
+co-dates with the parquet rebuild.
 
-```bash
-cd /Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db
-update_blastdb.pl ref_viruses_rep_genomes mito_rna_db
-update_blastdb.pl --decompress taxdb
+Override the default DB list in `refresh/config.local.yaml` if
+your local install uses a different alias mix:
+
+```yaml
+BLAST_NAMES: ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
+BLAST_PUBLISH_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
 ```
 
-The hand-written `viral_rna_mito.nal` alias the pipeline points
-at stays as-is across refreshes; it references the two
-underlying BLAST DBs by name. Keep refresh dates close to the
-parquet rebuild so the four classifier DBs share a coordinated
-snapshot.
+After the refresh, point the main pipeline at the new alias:
+
+```yaml
+BLASTN_DB: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral/viral_rna_mito"
+```
 
 ## Troubleshooting
 

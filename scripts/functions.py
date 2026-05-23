@@ -18,6 +18,167 @@ import pandas as pd
 import pyfastx
 
 
+_STRAIN_LIKE_MARKERS = (
+    " type ",
+    " strain ",
+    " isolate ",
+    " genotype ",
+    " serotype ",
+    " subtype ",
+)
+
+
+def _is_strain_like_name(name: str) -> bool:
+    """Heuristic for "this taxid is a strain/type/isolate sub-entry".
+
+    NCBI's viral taxonomy carries many "no rank" taxa below the species
+    level that exist purely to register a sequenced isolate or a
+    serologically distinct type (e.g. ``Human herpesvirus 4 type 2``,
+    ``Human alphaherpesvirus 1 strain F``). Detect them by looking for
+    the marker words separated by spaces so we do not match substrings
+    in the middle of legitimate species names. Case-insensitive.
+    """
+    if not name:
+        return False
+    padded = " " + name.lower() + " "
+    return any(marker in padded for marker in _STRAIN_LIKE_MARKERS)
+
+
+def canonicalise_blast_match_name(
+    blastn_df: pd.DataFrame,
+    parquet_df: pd.DataFrame,
+    nodes_dmp: str | None,
+    names_dmp: str | None,
+) -> pd.DataFrame:
+    """Rewrite the BLAST ``match_name`` column with the canonical
+    NCBI scientific name of the lowest non-strain-like ancestor.
+
+    NCBI's RefSeq keeps multiple records per species when a sequenced
+    isolate or serologically distinct type was registered as its own
+    taxon: ``NC_007605`` (EBV-1, taxid 10376, name
+    ``human gammaherpesvirus 4``) and ``NC_009334`` (EBV-2,
+    taxid 12509, name ``Human herpesvirus 4 type 2``) are the
+    archetypal pair. The two records appear as separate bars in the
+    Assembly classification chart even though they are the same
+    species; this function collapses them by walking the
+    ``nodes.dmp`` parent chain until reaching a taxid whose
+    scientific name no longer carries a strain / type / isolate
+    marker, and using that taxid's name as the canonical label.
+
+    Behaviour:
+    - Lookup the BLAST hit's accession in ``parquet_df`` -> ``tax_id``.
+      Try the raw accession first, then the version-stripped form.
+    - Walk up via ``nodes.dmp`` parent pointers while the current
+      taxid's scientific name is strain-like. Stop at the first
+      ancestor whose name is not strain-like, or when we hit taxid 1
+      (root) without finding one.
+    - Replace ``match_name`` with the canonical scientific name; keep
+      the raw BLAST title in a new ``match_name_raw`` column for
+      audit.
+    - Rows whose accession is absent from the parquet, or whose taxid
+      is missing from the taxdump, pass through unchanged with
+      ``match_name_raw`` set equal to ``match_name``.
+
+    A missing ``nodes.dmp`` / ``names.dmp`` path (config did not
+    point at a taxdump) degrades to a no-op: the merged CSV gets a
+    ``match_name_raw`` column duplicating ``match_name``, but no
+    rewriting happens.
+    """
+    if blastn_df.empty or "match_name" not in blastn_df.columns:
+        return blastn_df
+
+    out = blastn_df.copy()
+    out["match_name_raw"] = out["match_name"].astype(str)
+
+    if (
+        not nodes_dmp
+        or not names_dmp
+        or not Path(nodes_dmp).is_file()
+        or not Path(names_dmp).is_file()
+    ):
+        return out
+
+    acc_to_tax = parquet_accession_to_taxid(parquet_df)
+
+    # Streaming readers for the two dmp files; both are small enough
+    # (215 / 290 MB on the current snapshot) for an in-memory load.
+    parent: dict[int, int] = {}
+    with open(nodes_dmp) as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 2:
+                continue
+            try:
+                tid = int(parts[0])
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            parent[tid] = pid
+
+    sci_name: dict[int, str] = {}
+    with open(names_dmp) as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4:
+                continue
+            if parts[3] != "scientific name":
+                continue
+            try:
+                tid = int(parts[0])
+            except ValueError:
+                continue
+            sci_name[tid] = parts[1]
+
+    def _canonical_taxid(tid: int) -> int:
+        """Walk up while the current name is strain-like."""
+        seen: set[int] = set()
+        current = tid
+        # Cap the walk so a malformed taxdump cannot produce an
+        # infinite loop.
+        for _ in range(64):
+            if current in seen:
+                break
+            seen.add(current)
+            name = sci_name.get(current, "")
+            if not _is_strain_like_name(name):
+                return current
+            nxt = parent.get(current)
+            if nxt is None or nxt == current or nxt == 1:
+                return current
+            current = nxt
+        return current
+
+    canonical_cache: dict[int, str] = {}
+
+    def _name_for_accession(accession: str) -> str | None:
+        if not accession:
+            return None
+        # Try versioned first, then version-stripped.
+        tid = acc_to_tax.get(accession) or acc_to_tax.get(
+            accession.split(".")[0]
+        )
+        if tid is None:
+            return None
+        if tid in canonical_cache:
+            return canonical_cache[tid]
+        cid = _canonical_taxid(tid)
+        name = sci_name.get(cid, "")
+        canonical_cache[tid] = name
+        return name or None
+
+    canonical_names: list[str] = []
+    for raw_match, accession in zip(
+        out["match_name"].astype(str),
+        out.get("accession", pd.Series([""] * len(out))).astype(str),
+        strict=False,
+    ):
+        new = _name_for_accession(accession)
+        canonical_names.append(new if new else raw_match)
+    out["match_name"] = canonical_names
+
+    return out
+
+
 def parquet_accession_to_taxid(parquet_df: pd.DataFrame) -> dict[str, int]:
     """Bucket VIRUS_PARQUET rows into a base-accession -> tax_id map.
 

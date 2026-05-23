@@ -17,3 +17,9 @@ dependencies:
   # kaiju ships `kaiju-mkbwt` + `kaiju-mkfmi` for the local
   # protein-index build.
   - kaiju
+  # BLAST+ ships `update_blastdb.pl` which the `refresh_blast`
+  # rule drives to fetch NCBI's pre-built viral BLAST tarballs
+  # (ref_viruses_rep_genomes, mito_rna_db, taxdb) into the
+  # snapshot directory alongside the parquet and the Kaiju FMI.
+  - blast>=2.15
+  - perl-archive-tar

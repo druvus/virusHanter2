@@ -21,6 +21,15 @@ DOWNLOAD_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_w
 # TSV next to the parquet.
 KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
 
+# BLAST DB tarballs the `refresh_blast` rule fetches via
+# `update_blastdb.pl`. The defaults match the production
+# `viral_rna_mito.nal` alias the main pipeline points at; override
+# `BLAST_NAMES` if you maintain a different alias mix locally.
+# `BLAST_PUBLISH_DIR` defaults to a sibling directory next to the
+# parquet so all four classifier DBs share a coordinated snapshot.
+# BLAST_NAMES:       ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
+# BLAST_PUBLISH_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
+
 # Source URLs. Override if you want a different snapshot. The
 # defaults pull the full multi-part NCBI viral RefSeq release
 # (genomic + protein) and the matching nucleotide + protein

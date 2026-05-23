@@ -11,6 +11,7 @@
 # config[ASSEMBLERS] and is loaded in Snakefile as `ASSEMBLERS`.
 
 import platform
+from pathlib import Path
 
 from scripts.functions import (
     fastx_file_to_df,
@@ -491,10 +492,23 @@ rule merge_checkv_blastn:
         blastn=rules.blastn.output.blast,
     output:
         merged_csv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/CHECKV/{{sample}}.merged.csv",
+    params:
+        virus_parquet=config["VIRUS_PARQUET"],
+        nodes_dmp=config.get("TAXDUMP_NODES", "") or "",
+        # `names.dmp` lives next to `nodes.dmp` for parquet refreshes
+        # produced by `refresh/refresh_virus_parquet.smk`. Derive it
+        # from the nodes path so we only need one config entry.
+        names_dmp=(
+            (Path(config.get("TAXDUMP_NODES", "")).parent / "names.dmp").as_posix()
+            if config.get("TAXDUMP_NODES")
+            else ""
+        ),
     conda:
         "../envs/panel.yaml"
     run:
         import pandas as pd
+
+        from scripts.functions import canonicalise_blast_match_name
 
         blastn_df = pd.read_csv(input.blastn)
         checkv_df = (
@@ -509,6 +523,27 @@ rule merge_checkv_blastn:
         # belt-and-braces in case the CSV was rewritten without it.
         if "assembler" not in merged.columns:
             merged = merged.assign(assembler=wildcards.assembler)
+
+        # Canonicalise the BLAST subject title via the parent walk
+        # through NCBI's taxdump so the Assembly classification chart
+        # no longer renders two bars for what is biologically the
+        # same species (the EBV-1 / EBV-2 case, the HSV-1 strain
+        # entries, the HHV-6A / HHV-6B split, ...). The function
+        # degrades to a no-op when TAXDUMP_NODES is empty or the
+        # dmp files are unreadable; `match_name_raw` is always added
+        # so the audit trail survives.
+        try:
+            parquet_df = pd.read_parquet(params.virus_parquet)
+        except Exception as e:
+            print(f"[merge_checkv_blastn] could not read parquet: {e}; skipping canonicalisation")
+            parquet_df = pd.DataFrame()
+        merged = canonicalise_blast_match_name(
+            merged,
+            parquet_df,
+            params.nodes_dmp or None,
+            params.names_dmp or None,
+        )
+
         merged.to_csv(output.merged_csv, index=False)
 
 

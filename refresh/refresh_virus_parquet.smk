@@ -56,6 +56,19 @@ TAXDUMP_MD5_URL = TAXDUMP_URL + ".md5"
 # inspects this DB to compare its taxid universe against the parquet's.
 KRAKEN_DB_FOR_COMPARE = config.get("KRAKEN_DB_FOR_COMPARE", "")
 
+# NCBI's pre-built BLAST DB tarballs the pipeline consumes. Default to
+# ref_viruses_rep_genomes (viral RefSeq reference genomes, matches the
+# parquet's source) plus mito_rna_db (mitochondrial + rRNA references
+# needed by the `viral_rna_mito` alias) plus taxdb (BLAST's own taxid
+# lookup files). Override BLAST_NAMES if a different alias mix is in
+# use locally.
+BLAST_NAMES = list(
+    config.get(
+        "BLAST_NAMES",
+        ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"],
+    )
+)
+
 FASTA = DOWNLOAD_DIR / "ncbi_virus_nucleotide.fna"
 FASTA_PARTS_DIR = DOWNLOAD_DIR / "refseq_viral_parts"
 FASTA_MARKER = DOWNLOAD_DIR / ".refseq_viral_downloaded"
@@ -82,6 +95,16 @@ KAIJU_BUILD_FAA = DOWNLOAD_DIR / "kaiju_refseq_viral.faa"
 PARQUET_PARENT = OUTPUT_PARQUET.parent
 TAXDUMP_NODES_PUBLISHED = PARQUET_PARENT / "nodes.dmp"
 KAIJU_PUBLISH_DIR = PARQUET_PARENT / "kaiju_refseq_viral"
+
+# BLAST tarballs land in a sibling directory alongside the parquet
+# so the main pipeline's BLASTN_DB key can point at a single
+# directory whose mtime tracks the refresh.
+BLAST_DOWNLOAD_DIR = DOWNLOAD_DIR / "blast"
+BLAST_PUBLISH_DIR = Path(
+    config.get("BLAST_PUBLISH_DIR", str(PARQUET_PARENT / "blast_refseq_viral"))
+)
+BLAST_SNAPSHOT_TSV = BLAST_PUBLISH_DIR / "snapshot.tsv"
+BLAST_VIRAL_ALIAS = BLAST_PUBLISH_DIR / "viral_rna_mito.nal"
 KAIJU_PUBLISHED_FMI = KAIJU_PUBLISH_DIR / "kaiju_refseq_viral.fmi"
 KAIJU_PUBLISHED_NODES = KAIJU_PUBLISH_DIR / "nodes.dmp"
 KAIJU_PUBLISHED_NAMES = KAIJU_PUBLISH_DIR / "names.dmp"
@@ -99,6 +122,8 @@ rule all:
         str(KAIJU_PUBLISHED_NODES),
         str(KAIJU_PUBLISHED_NAMES),
         str(OVERLAP_TSV),
+        str(BLAST_SNAPSHOT_TSV),
+        str(BLAST_VIRAL_ALIAS),
 
 
 rule download_refseq_viral_nucleotide:
@@ -452,4 +477,93 @@ rule compare_with_kraken2:
             --build-stats {input.stats} \
             --out {output.overlap_tsv} \
             > {log} 2>&1
+        """
+
+
+# BLAST viral DB refresh.
+#
+# Drives `update_blastdb.pl` to fetch the pre-built NCBI BLAST
+# tarballs the main pipeline's BLASTN_DB consumes
+# (`ref_viruses_rep_genomes`, `mito_rna_db`, `taxdb`) and a small
+# manifest (`snapshot.tsv`) that records each tarball's MD5 + size +
+# fetch date. The result is a directory layout the main pipeline
+# can point at via:
+#
+#   BLASTN_DB: "<PARQUET_PARENT>/blast_refseq_viral/viral_rna_mito"
+#
+# The `viral_rna_mito.nal` alias is generated from
+# ref_viruses_rep_genomes + mito_rna_db so a single BLAST run
+# queries both. `taxdb` is decompressed in-place so BLAST's
+# subject-title resolution works at run time.
+rule refresh_blast:
+    """Fetch the configured BLAST tarballs into BLAST_DOWNLOAD_DIR
+    via `update_blastdb.pl`, then publish the decompressed files
+    into BLAST_PUBLISH_DIR. Tarballs are kept under the download
+    workdir so a subsequent re-run can pick up only the changed
+    files (NCBI honours conditional GET on the BLAST FTP).
+    """
+    output:
+        snapshot=str(BLAST_SNAPSHOT_TSV),
+        alias=str(BLAST_VIRAL_ALIAS),
+    params:
+        download_dir=str(BLAST_DOWNLOAD_DIR),
+        publish_dir=str(BLAST_PUBLISH_DIR),
+        names=" ".join(BLAST_NAMES),
+    log:
+        str(DOWNLOAD_DIR / "logs" / "refresh_blast.log"),
+    conda:
+        "../envs/refresh.yaml"
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p {params.download_dir} {params.publish_dir}
+
+        # `update_blastdb.pl` fetches and decompresses each tarball
+        # into the current working directory. cd into the download
+        # workdir so the side effects stay contained.
+        cd {params.download_dir}
+        update_blastdb.pl --decompress {params.names} \\
+            > {log} 2>&1
+
+        # Move the decompressed DB files into the publish dir so
+        # the parquet's directory carries the coordinated snapshot.
+        # `mv -f` overwrites any older copies left from a previous
+        # refresh.
+        for ext in nsq nhr nin nog nsd nsi ntf nto ndb njs not nhd nhi; do
+            for src in {params.download_dir}/*.${{ext}}; do
+                [ -e "$src" ] || continue
+                mv -f "$src" {params.publish_dir}/ 2>>{log}
+            done
+        done
+        # taxdb files have their own naming (taxdb.bti, taxdb.btd).
+        for src in {params.download_dir}/taxdb.*; do
+            [ -e "$src" ] || continue
+            mv -f "$src" {params.publish_dir}/ 2>>{log}
+        done
+
+        # Write a single-line alias file (.nal) so a single BLAST
+        # invocation queries both ref_viruses_rep_genomes and
+        # mito_rna_db (the production `viral_rna_mito` alias).
+        cat > {output.alias} <<NAL
+#
+# BLAST alias bundling viral RefSeq reference genomes and the
+# mitochondrial / rRNA references. Regenerated by the refresh
+# workflow whenever the underlying BLAST tarballs change.
+#
+TITLE viral_rna_mito
+DBLIST ref_viruses_rep_genomes mito_rna_db
+NAL
+
+        # Snapshot manifest: one line per requested DB carrying the
+        # tarball mtime + the published file count. Lets the
+        # operator audit at a glance whether the BLAST refresh and
+        # the parquet refresh are co-dated.
+        {{
+            printf 'name\tfetched_utc\tfiles_count\n'
+            for name in {params.names}; do
+                fetched=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                files=$(ls -1 {params.publish_dir}/${{name}}.* 2>/dev/null | wc -l | tr -d ' ')
+                printf '%s\t%s\t%s\n' "$name" "$fetched" "$files"
+            done
+        }} > {output.snapshot}
         """
