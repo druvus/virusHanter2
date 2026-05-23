@@ -94,6 +94,7 @@ KAIJU_BUILD_FAA = DOWNLOAD_DIR / "kaiju_refseq_viral.faa"
 # locations that survive the temporary download workdir.
 PARQUET_PARENT = OUTPUT_PARQUET.parent
 TAXDUMP_NODES_PUBLISHED = PARQUET_PARENT / "nodes.dmp"
+TAXDUMP_NAMES_PUBLISHED = PARQUET_PARENT / "names.dmp"
 KAIJU_PUBLISH_DIR = PARQUET_PARENT / "kaiju_refseq_viral"
 
 # BLAST tarballs land in a sibling directory alongside the parquet
@@ -118,6 +119,7 @@ rule all:
         OUTPUT_PARQUET,
         OUTPUT_PARQUET.with_name(OUTPUT_PARQUET.stem + "_build_stats.json"),
         str(TAXDUMP_NODES_PUBLISHED),
+        str(TAXDUMP_NAMES_PUBLISHED),
         str(KAIJU_PUBLISHED_FMI),
         str(KAIJU_PUBLISHED_NODES),
         str(KAIJU_PUBLISHED_NAMES),
@@ -439,17 +441,24 @@ rule publish_kaiju_refseq_viral:
 
 
 rule publish_taxdump_nodes:
-    """Copy the extracted ``nodes.dmp`` next to the parquet so the
-    main pipeline's ``TAXDUMP_NODES`` config key can point at a
-    stable location that survives the temporary download workdir."""
+    """Copy the extracted ``nodes.dmp`` and ``names.dmp`` next to
+    the parquet so the main pipeline's ``TAXDUMP_NODES`` config key
+    can point at a stable location that survives the temporary
+    download workdir. Both files land together because the
+    canonicalisation helper in ``scripts/functions.py`` derives the
+    ``names.dmp`` path from ``nodes.dmp``'s parent — they have to
+    sit side-by-side or the canonicalisation degrades to a no-op."""
     input:
         nodes=rules.decompress_taxdump.output.nodes,
+        names=rules.decompress_taxdump.output.names,
     output:
         nodes=str(TAXDUMP_NODES_PUBLISHED),
+        names=str(TAXDUMP_NAMES_PUBLISHED),
     shell:
         """
         mkdir -p $(dirname {output.nodes})
         cp {input.nodes} {output.nodes}
+        cp {input.names} {output.names}
         """
 
 
