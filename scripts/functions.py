@@ -15,7 +15,12 @@ import subprocess
 
 import numpy as np
 import pandas as pd
-import pyfastx
+
+# ``pyfastx`` is used only by ``fastx_file_to_df`` (called from the
+# wrangle_pilon rule's panel env). Lazy-import inside that function so
+# the rest of the module (the BLAST / classifier canonicalisers used
+# by the kaiju / bwa / blastn envs) does not pull pyfastx as a
+# hard dependency.
 
 
 _STRAIN_LIKE_MARKERS = (
@@ -503,6 +508,8 @@ def fastx_file_to_df(fastx_file: str) -> pd.DataFrame:
     (name, sequence). Earlier versions returned attribute-bearing objects;
     callers in the original virusHanter targeted that older API.
     """
+    import pyfastx  # noqa: PLC0415 - lazy import; see module-level note
+
     fastx = pyfastx.Fastx(fastx_file)
     rows = [(record[0], record[1]) for record in fastx]
     if not rows:

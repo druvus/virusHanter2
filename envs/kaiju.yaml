@@ -3,3 +3,9 @@ channels:
   - bioconda
 dependencies:
   - kaiju>=1.10
+  # kaiju_to_table rule is now a `script:` that post-processes the
+  # TSV via canonicalise_taxon_names (scripts/functions.py). Add the
+  # Python deps that helper needs.
+  - python>=3.12
+  - pandas>=2.0
+  - numpy>=1.24

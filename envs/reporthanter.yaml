@@ -9,7 +9,7 @@ dependencies:
   # Match the driver Snakemake to avoid pickle incompatibilities with the
   # `script:` directive (which transfers Snakemake.io objects between
   # processes via pickle and fails if classes have been renamed).
-  - snakemake-minimal=9.14.*
+  - snakemake-minimal=9.20.*
   - pip:
       # Pin to a released tag rather than @main so the same pipeline
       # invocation on different days uses the same reportHanter code.

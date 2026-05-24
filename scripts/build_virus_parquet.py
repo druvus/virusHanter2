@@ -49,7 +49,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
-import pyfastx
+
+# Lazy-import pyfastx inside the FASTA-reading helper so consumers
+# that only call the taxdump parser / walk-up helpers (e.g. the
+# bwa_align_to_kraken_hits script in an env without pyfastx) do not
+# need the dependency.
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,6 +131,8 @@ def fasta_records(fastas: list[Path]) -> list[tuple[str, str]]:
     list of (header, sequence) tuples in input order. `header` is
     the full header string from the FASTA without the leading '>'.
     """
+    import pyfastx  # noqa: PLC0415 - lazy import; see module-level note
+
     rows: list[tuple[str, str]] = []
     for f in fastas:
         logging.info("Reading FASTA: %s", f)
