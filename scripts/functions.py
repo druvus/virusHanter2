@@ -44,13 +44,31 @@ def _is_strain_like_name(name: str) -> bool:
     return any(marker in padded for marker in _STRAIN_LIKE_MARKERS)
 
 
+# Name categories from names.dmp surfaced as "aliases" alongside the
+# scientific name. Scientists need the old / common / acronym forms
+# to recognise a species that NCBI / ICTV has recently renamed.
+_ALIAS_NAME_CLASSES = (
+    "acronym",
+    "common name",
+    "genbank common name",
+    "equivalent name",
+    "synonym",
+    "genbank synonym",
+    "genbank acronym",
+)
+
+
 def _load_taxdump_for_species_walkup(
     nodes_dmp: str | None, names_dmp: str | None
-) -> tuple[dict[int, tuple[int, str]], dict[int, str]] | None:
+) -> tuple[dict[int, tuple[int, str]], dict[int, str], dict[int, list[str]]] | None:
     """Parse nodes.dmp + names.dmp for the species walkup helpers.
 
-    Returns ``None`` if either path is missing; callers degrade to
-    a no-op in that case rather than raising.
+    Returns ``(node_info, sci_name, alias_name)`` where ``alias_name``
+    maps each tax_id to the deduplicated list of its non-scientific
+    names from ``names.dmp`` (acronym, common name, genbank common
+    name, equivalent name, synonym, genbank synonym, genbank acronym).
+    Returns ``None`` if either path is missing; callers degrade to a
+    no-op in that case rather than raising.
     """
     if (
         not nodes_dmp
@@ -73,17 +91,68 @@ def _load_taxdump_for_species_walkup(
                 continue
             node_info[tid] = (pid, parts[2].strip())
     sci_name: dict[int, str] = {}
+    alias_name: dict[int, list[str]] = {}
+    alias_seen: dict[int, set[str]] = {}
     with open(names_dmp) as fh:
         for line in fh:
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 4 or parts[3] != "scientific name":
+            if len(parts) < 4:
                 continue
+            name_class = parts[3]
             try:
                 tid = int(parts[0])
             except ValueError:
                 continue
-            sci_name[tid] = parts[1]
-    return node_info, sci_name
+            value = parts[1]
+            if name_class == "scientific name":
+                sci_name[tid] = value
+            elif name_class in _ALIAS_NAME_CLASSES:
+                bucket = alias_seen.setdefault(tid, set())
+                if value not in bucket:
+                    bucket.add(value)
+                    alias_name.setdefault(tid, []).append(value)
+    return node_info, sci_name, alias_name
+
+
+def _format_aliases(
+    tid: int,
+    species_tid: int,
+    sci_name: dict[int, str],
+    alias_name: dict[int, list[str]],
+) -> str:
+    """Return a deduplicated "name1; name2" alias string for ``tid``.
+
+    Collects aliases from both the row's own tax_id and its species
+    ancestor (when distinct), then drops the canonical species
+    scientific name itself so it does not repeat alongside the
+    binomial. Order: row-own aliases first, then species-ancestor
+    aliases; case-insensitive dedupe.
+    """
+    seen_lower: set[str] = set()
+    out: list[str] = []
+    canonical = sci_name.get(species_tid or tid, "")
+    if canonical:
+        seen_lower.add(canonical.lower())
+    # Pull both the row's own scientific name (the legacy NCBI name
+    # scientists still recognise — e.g. ``human gammaherpesvirus 4``
+    # for taxid 10376 when its species ancestor is the binomial
+    # ``Lymphocryptovirus humangamma4``) and every non-scientific
+    # alias category from both the row taxid and the species
+    # ancestor. Case-insensitive dedupe; preserve discovery order.
+    for source_tid in (tid, species_tid):
+        if not source_tid:
+            continue
+        own_sci = sci_name.get(source_tid, "")
+        if own_sci and own_sci.lower() not in seen_lower:
+            seen_lower.add(own_sci.lower())
+            out.append(own_sci)
+        for value in alias_name.get(source_tid, []):
+            key = value.lower()
+            if key in seen_lower:
+                continue
+            seen_lower.add(key)
+            out.append(value)
+    return "; ".join(out)
 
 
 def canonicalise_taxon_names(
@@ -119,13 +188,13 @@ def canonicalise_taxon_names(
     parsed = _load_taxdump_for_species_walkup(nodes_dmp, names_dmp)
     if parsed is None:
         return out
-    node_info, sci_name = parsed
+    node_info, sci_name, alias_name = parsed
 
-    cache: dict[int, str] = {}
+    species_cache: dict[int, int] = {}
 
-    def _species_name(tid: int) -> str | None:
-        if tid in cache:
-            return cache[tid] or None
+    def _species_taxid(tid: int) -> int:
+        if tid in species_cache:
+            return species_cache[tid]
         seen: set[int] = set()
         current = tid
         for _ in range(64):
@@ -137,16 +206,16 @@ def canonicalise_taxon_names(
                 break
             parent_tid, rank = node
             if rank == "species":
-                name = sci_name.get(current, "")
-                cache[tid] = name
-                return name or None
+                species_cache[tid] = current
+                return current
             if parent_tid == current or parent_tid == 1:
                 break
             current = parent_tid
-        cache[tid] = ""
-        return None
+        species_cache[tid] = 0
+        return 0
 
     new_names: list[str] = []
+    aliases: list[str] = []
     for raw_name, raw_taxid in zip(
         out[name_col].astype(str), out[taxid_col], strict=False
     ):
@@ -154,10 +223,14 @@ def canonicalise_taxon_names(
             tid = int(raw_taxid)
         except (TypeError, ValueError):
             new_names.append(raw_name)
+            aliases.append("")
             continue
-        canonical = _species_name(tid)
+        species_tid = _species_taxid(tid)
+        canonical = sci_name.get(species_tid, "") if species_tid else ""
         new_names.append(canonical if canonical else raw_name)
+        aliases.append(_format_aliases(tid, species_tid, sci_name, alias_name))
     out[name_col] = new_names
+    out["aliases"] = aliases
     return out
 
 
@@ -220,38 +293,10 @@ def canonicalise_blast_match_name(
 
     acc_to_tax = parquet_accession_to_taxid(parquet_df)
 
-    # Streaming readers for the two dmp files; both are small enough
-    # (215 / 290 MB on the current snapshot) for an in-memory load.
-    # ``nodes.dmp`` is parsed into ``{tid: (parent, rank)}`` so the
-    # walk-up can stop at the first species-rank ancestor (ICTV
-    # binomial) rather than depending on a strain-name heuristic.
-    node_info: dict[int, tuple[int, str]] = {}
-    with open(nodes_dmp) as fh:
-        for line in fh:
-            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
-            parts = stripped.split("\t|\t")
-            if len(parts) < 3:
-                continue
-            try:
-                tid = int(parts[0].strip())
-                pid = int(parts[1].strip())
-            except ValueError:
-                continue
-            node_info[tid] = (pid, parts[2].strip())
-
-    sci_name: dict[int, str] = {}
-    with open(names_dmp) as fh:
-        for line in fh:
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 4:
-                continue
-            if parts[3] != "scientific name":
-                continue
-            try:
-                tid = int(parts[0])
-            except ValueError:
-                continue
-            sci_name[tid] = parts[1]
+    parsed = _load_taxdump_for_species_walkup(nodes_dmp, names_dmp)
+    if parsed is None:
+        return out
+    node_info, sci_name, alias_name = parsed
 
     def _canonical_taxid(tid: int) -> int:
         """Walk up to the first species-rank ancestor.
@@ -299,9 +344,9 @@ def canonicalise_blast_match_name(
             current = parent_tid
         return current
 
-    canonical_cache: dict[int, str] = {}
+    canonical_cache: dict[int, tuple[str, str]] = {}
 
-    def _name_for_accession(accession: str) -> str | None:
+    def _name_and_aliases_for_accession(accession: str) -> tuple[str, str] | None:
         if not accession:
             return None
         # Try versioned first, then version-stripped.
@@ -314,18 +359,26 @@ def canonicalise_blast_match_name(
             return canonical_cache[tid]
         cid = _canonical_taxid(tid)
         name = sci_name.get(cid, "")
-        canonical_cache[tid] = name
-        return name or None
+        aliases = _format_aliases(tid, cid, sci_name, alias_name)
+        canonical_cache[tid] = (name, aliases)
+        return name, aliases
 
     canonical_names: list[str] = []
+    canonical_aliases: list[str] = []
     for raw_match, accession in zip(
         out["match_name"].astype(str),
         out.get("accession", pd.Series([""] * len(out))).astype(str),
         strict=False,
     ):
-        new = _name_for_accession(accession)
-        canonical_names.append(new if new else raw_match)
+        result = _name_and_aliases_for_accession(accession)
+        if result and result[0]:
+            canonical_names.append(result[0])
+            canonical_aliases.append(result[1])
+        else:
+            canonical_names.append(raw_match)
+            canonical_aliases.append("")
     out["match_name"] = canonical_names
+    out["aliases"] = canonical_aliases
 
     return out
 

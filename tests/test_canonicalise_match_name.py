@@ -203,6 +203,60 @@ def test_canonicalise_walks_to_species_rank_for_ictv_binomial(tmp_path):
     ]
 
 
+def test_canonicalise_collects_aliases_from_names_dmp(tmp_path):
+    """The canonicaliser writes an ``aliases`` column carrying the
+    deduplicated acronym / common name / equivalent name entries
+    from both the row's own tax_id and the species ancestor, so
+    scientists still recognise EBV / HHV-4 / Epstein-Barr virus
+    alongside the new ``Lymphocryptovirus humangamma4`` label.
+    """
+    nodes_text = (
+        "1\t|\t1\t|\tno rank\t|\t\t|\n"
+        "3050299\t|\t1\t|\tspecies\t|\t\t|\n"
+        "10376\t|\t3050299\t|\tno rank\t|\t\t|\n"
+    )
+    names_text = (
+        "3050299\t|\tLymphocryptovirus humangamma4\t|\t\t|\tscientific name\t|\n"
+        "3050299\t|\tHuGHV4\t|\t\t|\tacronym\t|\n"
+        "10376\t|\thuman gammaherpesvirus 4\t|\t\t|\tscientific name\t|\n"
+        "10376\t|\tEBV\t|\t\t|\tacronym\t|\n"
+        "10376\t|\tEpstein-Barr virus\t|\t\t|\tgenbank common name\t|\n"
+        "10376\t|\tHuman herpesvirus 4\t|\t\t|\tequivalent name\t|\n"
+    )
+    nodes = tmp_path / "nodes.dmp"
+    names = tmp_path / "names.dmp"
+    nodes.write_text(nodes_text)
+    names.write_text(names_text)
+    parquet_df_local = pd.DataFrame(
+        {
+            "name": ["NC_007605.1 Human gammaherpesvirus 4, complete genome"],
+            "sequence": ["A"],
+            "tax_id": [10376],
+        }
+    )
+    blastn = pd.DataFrame(
+        {
+            "name": ["contig_A"],
+            "match_name": ["Human gammaherpesvirus 4, complete genome"],
+            "accession": ["NC_007605"],
+            "read_len": [3000],
+        }
+    )
+    out = canonicalise_blast_match_name(
+        blastn, parquet_df_local, str(nodes), str(names)
+    )
+    assert list(out["match_name"]) == ["Lymphocryptovirus humangamma4"]
+    aliases = out["aliases"].iloc[0]
+    # All four legacy names appear in the alias bundle.
+    assert "EBV" in aliases
+    assert "Epstein-Barr virus" in aliases
+    assert "Human herpesvirus 4" in aliases
+    assert "human gammaherpesvirus 4" in aliases
+    assert "HuGHV4" in aliases
+    # The canonical scientific name itself is NOT repeated in aliases.
+    assert "Lymphocryptovirus humangamma4" not in aliases
+
+
 def test_canonicalise_no_taxdump_degrades_gracefully(parquet_df):
     blastn = pd.DataFrame(
         {

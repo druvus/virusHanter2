@@ -24,7 +24,11 @@ from scripts.build_virus_parquet import (  # noqa: E402
     find_species_taxid,
     parse_nodes_dmp,
 )
-from scripts.functions import parquet_accession_to_taxid  # noqa: E402
+from scripts.functions import (  # noqa: E402
+    _format_aliases,
+    _load_taxdump_for_species_walkup,
+    parquet_accession_to_taxid,
+)
 
 snakemake = snakemake  # type: ignore[name-defined]
 
@@ -60,23 +64,18 @@ rank_filter: set[str] = set(params.coverage_rank_filter or [])
 taxdump_path = params.taxdump_nodes
 nodes: dict[int, tuple[int, str]] = {}
 sci_name_by_tid: dict[int, str] = {}
+alias_by_tid: dict[int, list[str]] = {}
 if taxdump_path and Path(taxdump_path).is_file():
     nodes = parse_nodes_dmp(Path(taxdump_path))
     # ``names.dmp`` is published next to ``nodes.dmp`` by the refresh
-    # workflow; load the scientific-name column so we can show ICTV
-    # binomial species names in the virus_names sidecar.
+    # workflow; load the scientific name plus the alias categories
+    # (acronym / common name / equivalent name / ...) so the
+    # virus_names sidecar can carry both the ICTV binomial and the
+    # legacy names scientists still recognise.
     names_path = Path(taxdump_path).parent / "names.dmp"
-    if names_path.is_file():
-        with open(names_path) as fh:
-            for line in fh:
-                parts = [p.strip() for p in line.split("|")]
-                if len(parts) < 4 or parts[3] != "scientific name":
-                    continue
-                try:
-                    tid = int(parts[0])
-                except ValueError:
-                    continue
-                sci_name_by_tid[tid] = parts[1]
+    parsed = _load_taxdump_for_species_walkup(str(taxdump_path), str(names_path))
+    if parsed is not None:
+        _node_info, sci_name_by_tid, alias_by_tid = parsed
 elif rank_filter or params.coverage_genus_walkup:
     print(
         "[bwa_align_to_kraken_hits] TAXDUMP_NODES not set or missing; "
@@ -85,20 +84,18 @@ elif rank_filter or params.coverage_genus_walkup:
     rank_filter = set()
 
 
-def _ictv_species_name(tid: int, fallback: str) -> str:
-    """Walk ``tid`` up to its species-rank ancestor and return that
-    ancestor's scientific name (the ICTV binomial when NCBI has
-    adopted one). Falls back to the supplied ``fallback`` name when
-    the walk cannot reach a species rank.
+def _ictv_species_name_and_aliases(tid: int, fallback: str) -> tuple[str, str]:
+    """Walk ``tid`` up to its species-rank ancestor; return the
+    canonical scientific name plus the deduplicated alias string
+    (``"EBV; Epstein-Barr virus; Human herpesvirus 4; ..."``) drawn
+    from both the row's own taxid and the species ancestor.
     """
     if not nodes or not sci_name_by_tid:
-        return fallback
+        return fallback, ""
     species_tid = find_species_taxid(tid, nodes)
-    if species_tid:
-        name = sci_name_by_tid.get(species_tid)
-        if name:
-            return name
-    return fallback
+    name = sci_name_by_tid.get(species_tid) if species_tid else None
+    aliases = _format_aliases(tid, species_tid, sci_name_by_tid, alias_by_tid)
+    return (name or fallback), aliases
 
 sources_for_tid: dict[int, set[str]] = {}
 names_for_tid: dict[int, str] = {}
@@ -189,14 +186,18 @@ selected_viruses = virus_db_df[
 
 Path(output.virus_fasta).parent.mkdir(parents=True, exist_ok=True)
 with open(output.virus_fasta, "w") as f, open(output.virus_names, "w") as nf:
-    nf.write("chrom\ttax_id\tname\tsources\n")
+    nf.write("chrom\ttax_id\tname\taliases\tsources\n")
     for row in selected_viruses.itertuples():
         accession = row.name.strip().split()[0]
         tid = int(row.tax_id)
-        species = _ictv_species_name(tid, names_for_tid.get(tid, ""))
+        species, aliases = _ictv_species_name_and_aliases(
+            tid, names_for_tid.get(tid, "")
+        )
+        # Strip tabs from aliases so the TSV stays well-formed.
+        aliases = aliases.replace("\t", " ")
         source_tag = ";".join(sorted(sources_for_tid.get(tid, set())))
         f.write(f">{row.name.strip()}\n{row.sequence}\n")
-        nf.write(f"{accession}\t{tid}\t{species}\t{source_tag}\n")
+        nf.write(f"{accession}\t{tid}\t{species}\t{aliases}\t{source_tag}\n")
 
 with open(output.unmapped_taxids, "w") as uf:
     uf.write("tax_id\tname\tsource\treason\n")
