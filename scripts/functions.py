@@ -44,6 +44,123 @@ def _is_strain_like_name(name: str) -> bool:
     return any(marker in padded for marker in _STRAIN_LIKE_MARKERS)
 
 
+def _load_taxdump_for_species_walkup(
+    nodes_dmp: str | None, names_dmp: str | None
+) -> tuple[dict[int, tuple[int, str]], dict[int, str]] | None:
+    """Parse nodes.dmp + names.dmp for the species walkup helpers.
+
+    Returns ``None`` if either path is missing; callers degrade to
+    a no-op in that case rather than raising.
+    """
+    if (
+        not nodes_dmp
+        or not names_dmp
+        or not Path(nodes_dmp).is_file()
+        or not Path(names_dmp).is_file()
+    ):
+        return None
+    node_info: dict[int, tuple[int, str]] = {}
+    with open(nodes_dmp) as fh:
+        for line in fh:
+            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
+            parts = stripped.split("\t|\t")
+            if len(parts) < 3:
+                continue
+            try:
+                tid = int(parts[0].strip())
+                pid = int(parts[1].strip())
+            except ValueError:
+                continue
+            node_info[tid] = (pid, parts[2].strip())
+    sci_name: dict[int, str] = {}
+    with open(names_dmp) as fh:
+        for line in fh:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4 or parts[3] != "scientific name":
+                continue
+            try:
+                tid = int(parts[0])
+            except ValueError:
+                continue
+            sci_name[tid] = parts[1]
+    return node_info, sci_name
+
+
+def canonicalise_taxon_names(
+    df: pd.DataFrame,
+    *,
+    taxid_col: str,
+    name_col: str,
+    nodes_dmp: str | None,
+    names_dmp: str | None,
+    raw_suffix: str = "_raw",
+) -> pd.DataFrame:
+    """Rewrite ``name_col`` with the ICTV-binomial species name for
+    every row's ``taxid_col``.
+
+    Walks the parent chain to the first species-rank ancestor (per
+    nodes.dmp) and substitutes that ancestor's scientific name (per
+    names.dmp). The original value is preserved in
+    ``<name_col><raw_suffix>``. Rows whose taxid is missing from the
+    taxdump pass through unchanged.
+
+    Generic over the classifier: pass ``("taxonomy_id", "name")`` for
+    the Kraken report or ``("taxon_id", "taxon_name")`` for Kaiju's
+    table. A missing taxdump degrades to a no-op (raw column added,
+    no rewriting).
+    """
+    if df.empty or name_col not in df.columns or taxid_col not in df.columns:
+        return df
+
+    out = df.copy()
+    raw_col = f"{name_col}{raw_suffix}"
+    out[raw_col] = out[name_col].astype(str)
+
+    parsed = _load_taxdump_for_species_walkup(nodes_dmp, names_dmp)
+    if parsed is None:
+        return out
+    node_info, sci_name = parsed
+
+    cache: dict[int, str] = {}
+
+    def _species_name(tid: int) -> str | None:
+        if tid in cache:
+            return cache[tid] or None
+        seen: set[int] = set()
+        current = tid
+        for _ in range(64):
+            if current in seen:
+                break
+            seen.add(current)
+            node = node_info.get(current)
+            if node is None:
+                break
+            parent_tid, rank = node
+            if rank == "species":
+                name = sci_name.get(current, "")
+                cache[tid] = name
+                return name or None
+            if parent_tid == current or parent_tid == 1:
+                break
+            current = parent_tid
+        cache[tid] = ""
+        return None
+
+    new_names: list[str] = []
+    for raw_name, raw_taxid in zip(
+        out[name_col].astype(str), out[taxid_col], strict=False
+    ):
+        try:
+            tid = int(raw_taxid)
+        except (TypeError, ValueError):
+            new_names.append(raw_name)
+            continue
+        canonical = _species_name(tid)
+        new_names.append(canonical if canonical else raw_name)
+    out[name_col] = new_names
+    return out
+
+
 def canonicalise_blast_match_name(
     blastn_df: pd.DataFrame,
     parquet_df: pd.DataFrame,

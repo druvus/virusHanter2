@@ -2,6 +2,7 @@
 
 # Import custom functions
 from scripts.functions import (
+    canonicalise_taxon_names,
     kaiju_db_files,
     wrangle_kraken,
 )
@@ -62,18 +63,17 @@ rule kaiju_to_table:
         nodes=_kaiju_nodes,
     output:
         kaiju_table=f"{RESULT_FOLDER}/{{sample}}/KAIJU/{{sample}}.kaiju.table.tsv",
+    params:
+        # Optional - when TAXDUMP_NODES is set (typically pointing at
+        # the refresh-workflow's published nodes.dmp + sibling
+        # names.dmp), the kaiju table's ``taxon_name`` column is
+        # post-rewritten to the ICTV-binomial species name via a
+        # parent-rank walk-up. Degrades to a no-op when unset.
+        taxdump_nodes=TAXDUMP_NODES,
     conda:
         "../envs/kaiju.yaml"
-    shell:
-        """
-        kaiju2table \
-            -t {input.nodes} \
-            -n {input.names} \
-            -r genus \
-            -e \
-            -o {output.kaiju_table} \
-            {input.kaiju_out}
-        """
+    script:
+        "../scripts/run_kaiju_to_table.py"
 
 # Rule: Kraken2 classification
 rule kraken:
@@ -111,8 +111,24 @@ rule wrangle_kraken:
         kraken_report=rules.kraken.output.kraken_report,
     output:
         kraken_csv=f"{RESULT_FOLDER}/{{sample}}/KRAKEN/{{sample}}.kraken.csv",
+    params:
+        taxdump_nodes=TAXDUMP_NODES,
     conda:
         "../envs/panel.yaml"
     run:
         df = wrangle_kraken(input.kraken_report)
+        # Same species-rank walkup as kaiju_to_table and the BLAST
+        # canonicaliser, so every classifier's output uses ICTV-binomial
+        # species names. Degrades to a no-op when TAXDUMP_NODES is unset.
+        from pathlib import Path as _P
+        if params.taxdump_nodes and _P(str(params.taxdump_nodes)).is_file():
+            _names = _P(str(params.taxdump_nodes)).parent / "names.dmp"
+            if _names.is_file():
+                df = canonicalise_taxon_names(
+                    df,
+                    taxid_col="taxonomy_id",
+                    name_col="name",
+                    nodes_dmp=str(params.taxdump_nodes),
+                    names_dmp=str(_names),
+                )
         df.to_csv(output.kraken_csv, index=False)
