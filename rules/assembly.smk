@@ -70,104 +70,8 @@ rule megahit:
         f"{RESULT_FOLDER}/{{sample}}/logs/megahit.log",
     conda:
         "../envs/megahit.yaml"
-    run:
-        import subprocess
-
-        # MEGAHIT refuses to run if the output directory already exists.
-        shell("rm -rf {params.out_dir}")
-        # MEGAHIT defaults to allocating 90% of detected RAM up front,
-        # which SIGSEGVs on a memory-tight host (e.g. an 18 GB laptop with
-        # other processes already running). Bound the request to a
-        # configurable fraction so it fits on small hosts; on a Linux box
-        # with abundant RAM this is still a sensible cap.
-        mem_fraction = float(config.get("MEGAHIT_MEM_FRACTION", 0.5))
-        # Apple Silicon bioconda osx-arm64 megahit has several
-        # reproducible quirks:
-        #   1. `megahit_core_popcnt` segfaults on `count -k 21`
-        #      regardless of memory;
-        #   2. `megahit_core_no_hw_accel` segfaults at `-t > 2`;
-        #   3. `megahit_core_no_hw_accel count -k 21` SIGSEGVs on
-        #      small inputs (raising the minimum k past 21 avoids
-        #      the buggy path);
-        #   4. `megahit_core_no_hw_accel assemble` segfaults
-        #      (SIGSEGV or SIGABRT) on some inputs once k > 57. The
-        #      first ceiling we tried (--k-max 67) held for the smoke
-        #      fixture and a handful of subsamples but tripped on
-        #      DRRKK sample 142, so the cap is now 57 to err on the
-        #      side of stability.
-        #
-        # Force the no_hw_accel variant, cap threads at 2, and clamp
-        # the k range to [27, 57] on Darwin/arm64. All four flags are
-        # no-ops or harmless on Linux, but the k-range narrowing is
-        # an assembly-quality concession so it is gated on the
-        # platform check rather than applied globally.
-        is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
-        no_hw_accel = "--no-hw-accel " if is_apple_silicon else ""
-        kmin_flag = "--k-min 27 " if is_apple_silicon else ""
-        kmax_flag = "--k-max 57 " if is_apple_silicon else ""
-        mh_threads = min(threads, 2) if is_apple_silicon else threads
-
-        # Apple Silicon megahit_core_no_hw_accel SIGSEGVs
-        # non-deterministically on real clinical input — the same
-        # invocation succeeds on one run and crashes on the next.
-        # Retry up to MEGAHIT_RETRIES times (default 4) before falling
-        # back to the dummy contig. Each retry wipes the partial
-        # output dir; MEGAHIT refuses to start otherwise. Linux defaults
-        # to one attempt, since the segfault path does not exist there.
-        max_attempts = (
-            int(config.get("MEGAHIT_RETRIES", 4)) + 1 if is_apple_silicon else 1
-        )
-
-        success = False
-        for attempt in range(1, max_attempts + 1):
-            shell("rm -rf {params.out_dir}")
-            try:
-                shell(
-                    "megahit "
-                    "-1 {input.r1} -2 {input.r2} "
-                    "-o {params.out_dir} "
-                    "--out-prefix {wildcards.sample} "
-                    f"-t {mh_threads} "
-                    f"-m {mem_fraction} "
-                    f"{no_hw_accel}"
-                    f"{kmin_flag}"
-                    f"{kmax_flag}"
-                    "2> {log}"
-                )
-                if Path(output.contigs).exists() and Path(output.contigs).stat().st_size > 0:
-                    success = True
-                    break
-            except subprocess.CalledProcessError:
-                # SIGSEGV / SIGABRT from megahit_core_no_hw_accel. The
-                # next loop iteration wipes the output dir and retries.
-                # `2> {log}` overwrites the log each attempt, so only
-                # the final attempt's stderr is preserved — which is
-                # what the user needs to diagnose the persistent
-                # failure case.
-                continue
-
-        if not success:
-            # Final fallback: emit a dummy contig file so downstream
-            # rules (Pilon, BLASTN, CheckV) still have an input to
-            # process. Mirrors the original virusHanter behaviour.
-            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
-            Path(output.contigs).touch()
-
-        # Drop intermediate MEGAHIT files; keep the contigs FASTA. The grep
-        # may exit non-zero when the directory only contains the .fa output;
-        # tolerate that.
-        shell(
-            "ls -d -1 {params.out_dir}/* 2>/dev/null "
-            "| grep -v .fa | xargs rm -rf || true"
-        )
-
-        # If MEGAHIT produced no contigs (or crashed), emit a dummy contig
-        # so downstream rules (BLASTN, CheckV, Pilon) still have an input.
-        # Mirrors the original virusHanter behavior.
-        if Path(output.contigs).read_text() == "":
-            with open(output.contigs, "w") as f:
-                f.write(">DUMMY_CONTIG\n")
-                f.write("TTAACCTTGG" * 20 + "\n")
+    script:
+        "../scripts/run_megahit.py"
 
 
 # Rule: De novo assembly with metaSPAdes
@@ -187,6 +91,7 @@ rule metaspades:
         contigs=f"{RESULT_FOLDER}/{{sample}}/metaSPAdes/{{sample}}.contigs.fa",
     params:
         out_dir=f"{RESULT_FOLDER}/{{sample}}/metaSPAdes",
+        mode="meta",
     threads: THREADS
     resources:
         mem_mb=32000,
@@ -195,49 +100,8 @@ rule metaspades:
         f"{RESULT_FOLDER}/{{sample}}/logs/metaspades.log",
     conda:
         "../envs/spades.yaml"
-    run:
-        import subprocess
-
-        shell("rm -rf {params.out_dir}")
-        shell("mkdir -p {params.out_dir}")
-
-        # metaSPAdes uses a JVM-style memory cap in gigabytes; round
-        # the Snakemake mem_mb resource down. Default to 16 G when
-        # the resources block is not honoured (e.g. local cores run).
-        mem_gb = max(8, int(resources.mem_mb / 1024))
-
-        try:
-            shell(
-                "spades.py --meta "
-                "-1 {input.r1} -2 {input.r2} "
-                "-o {params.out_dir} "
-                f"-t {threads} "
-                f"-m {mem_gb} "
-                "--only-assembler "
-                "> {log} 2>&1"
-            )
-        except subprocess.CalledProcessError:
-            # metaSPAdes refuses libraries below its internal minimum
-            # and exits non-zero. Continue to the fallback below so
-            # the rest of the DAG still has an input.
-            pass
-
-        spades_contigs = Path(params.out_dir) / "contigs.fasta"
-        if spades_contigs.exists() and spades_contigs.stat().st_size > 0:
-            shell(f"mv {spades_contigs} {{output.contigs}}")
-        else:
-            # Dummy contig fallback. Mirrors the MEGAHIT rule's
-            # behaviour and keeps Pilon / BLASTN / CheckV happy.
-            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
-            with open(output.contigs, "w") as f:
-                f.write(">DUMMY_CONTIG\n")
-                f.write("TTAACCTTGG" * 20 + "\n")
-
-        # Strip SPAdes intermediates; keep the contigs FASTA only.
-        shell(
-            "ls -d -1 {params.out_dir}/* 2>/dev/null "
-            "| grep -v .contigs.fa | xargs rm -rf || true"
-        )
+    script:
+        "../scripts/run_spades.py"
 
 
 # Rule: De novo assembly with rnaviralSPAdes
@@ -256,6 +120,7 @@ rule rnaviralspades:
         contigs=f"{RESULT_FOLDER}/{{sample}}/rnaviralSPAdes/{{sample}}.contigs.fa",
     params:
         out_dir=f"{RESULT_FOLDER}/{{sample}}/rnaviralSPAdes",
+        mode="rnaviral",
     threads: THREADS
     resources:
         mem_mb=32000,
@@ -264,49 +129,8 @@ rule rnaviralspades:
         f"{RESULT_FOLDER}/{{sample}}/logs/rnaviralspades.log",
     conda:
         "../envs/spades.yaml"
-    run:
-        import subprocess
-
-        shell("rm -rf {params.out_dir}")
-        shell("mkdir -p {params.out_dir}")
-
-        mem_gb = max(8, int(resources.mem_mb / 1024))
-
-        try:
-            shell(
-                "spades.py --rnaviral "
-                "-1 {input.r1} -2 {input.r2} "
-                "-o {params.out_dir} "
-                f"-t {threads} "
-                f"-m {mem_gb} "
-                "--only-assembler "
-                "> {log} 2>&1"
-            )
-        except subprocess.CalledProcessError:
-            # rnaviralSPAdes shares metaSPAdes' "refuses too-small
-            # libraries" failure mode. The fallback writes the dummy
-            # contig so Pilon / BLASTN / CheckV still have an input.
-            pass
-
-        # rnaviralSPAdes writes the assembled transcripts to
-        # ``transcripts.fasta`` rather than ``contigs.fasta``; fall
-        # back to ``contigs.fasta`` if a future SPAdes release
-        # renames the file.
-        for candidate in ("transcripts.fasta", "contigs.fasta"):
-            src = Path(params.out_dir) / candidate
-            if src.exists() and src.stat().st_size > 0:
-                shell(f"mv {src} {{output.contigs}}")
-                break
-        else:
-            Path(params.out_dir).mkdir(parents=True, exist_ok=True)
-            with open(output.contigs, "w") as f:
-                f.write(">DUMMY_CONTIG\n")
-                f.write("TTAACCTTGG" * 20 + "\n")
-
-        shell(
-            "ls -d -1 {params.out_dir}/* 2>/dev/null "
-            "| grep -v .contigs.fa | xargs rm -rf || true"
-        )
+    script:
+        "../scripts/run_spades.py"
 
 
 # Rule: QUAST assembly assessment on the raw assembler contigs.
@@ -361,32 +185,23 @@ rule pilon:
         f"{RESULT_FOLDER}/{{sample}}/logs/pilon_{{assembler}}.log",
     conda:
         "../envs/pilon.yaml"
-    run:
-        # Rebuild a temporary BWA index of the assembly.
-        shell("rm -rf {params.index_folder}")
-        shell("mkdir -p {params.index_folder}")
-        index_prefix = f"{params.index_folder}/{wildcards.sample}"
-        shell("bwa index -p {index_prefix} {input.contigs} >> {log} 2>&1")
-
-        # Map reads back to contigs and sort.
-        shell(
-            "bwa mem -t {threads} {index_prefix} {input.r1} {input.r2} 2>> {log} "
-            "| samtools view -h -O bam "
-            "| samtools sort -o {output.contigs_bam}"
-        )
-        shell("samtools index {output.contigs_bam}")
-
-        # Polish.
-        shell(
-            "pilon -Xmx{params.pilon_mem} --threads {threads} "
-            "--genome {input.contigs} --frags {output.contigs_bam} "
-            "--outdir {params.pilon_folder} "
-            "--output {wildcards.sample}_improved_contigs "
-            ">> {log} 2>&1"
-        )
-
-        # Drop the temporary index.
-        shell("rm -rf {params.index_folder}")
+    shell:
+        """
+        rm -rf {params.index_folder}
+        mkdir -p {params.index_folder}
+        INDEX_PREFIX={params.index_folder}/{wildcards.sample}
+        bwa index -p $INDEX_PREFIX {input.contigs} >> {log} 2>&1
+        bwa mem -t {threads} $INDEX_PREFIX {input.r1} {input.r2} 2>> {log} \
+            | samtools view -h -O bam \
+            | samtools sort -o {output.contigs_bam}
+        samtools index {output.contigs_bam}
+        pilon -Xmx{params.pilon_mem} --threads {threads} \
+            --genome {input.contigs} --frags {output.contigs_bam} \
+            --outdir {params.pilon_folder} \
+            --output {wildcards.sample}_improved_contigs \
+            >> {log} 2>&1
+        rm -rf {params.index_folder}
+        """
 
 
 # Rule: Convert polished contigs FASTA into a length-filtered CSV
@@ -431,18 +246,8 @@ rule blastn:
         f"{RESULT_FOLDER}/{{sample}}/logs/blastn_{{assembler}}.log",
     conda:
         "../envs/blastn.yaml"
-    run:
-        Path(output.blast).parent.mkdir(parents=True, exist_ok=True)
-        df = run_blastn(
-            contigs_csv=input.contigs,
-            db=params.db,
-            temp_file=params.temp_file,
-            threads=threads,
-        )
-        df.to_csv(output.blast, index=False)
-
-        if Path(params.temp_file).exists():
-            os.remove(params.temp_file)
+    script:
+        "../scripts/run_blastn.py"
 
 
 # Rule: Assess host contamination of contigs with CheckV (per assembler)
