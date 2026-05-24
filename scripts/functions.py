@@ -53,25 +53,28 @@ def canonicalise_blast_match_name(
     """Rewrite the BLAST ``match_name`` column with the canonical
     NCBI scientific name of the lowest non-strain-like ancestor.
 
-    NCBI's RefSeq keeps multiple records per species when a sequenced
-    isolate or serologically distinct type was registered as its own
-    taxon: ``NC_007605`` (EBV-1, taxid 10376, name
-    ``human gammaherpesvirus 4``) and ``NC_009334`` (EBV-2,
-    taxid 12509, name ``Human herpesvirus 4 type 2``) are the
-    archetypal pair. The two records appear as separate bars in the
-    Assembly classification chart even though they are the same
-    species; this function collapses them by walking the
-    ``nodes.dmp`` parent chain until reaching a taxid whose
-    scientific name no longer carries a strain / type / isolate
-    marker, and using that taxid's name as the canonical label.
+    NCBI's RefSeq keeps multiple records per ICTV species when a
+    sequenced isolate or serologically distinct type was registered
+    as its own taxon: ``NC_007605`` (EBV-1, taxid 10376, rank S1,
+    name ``human gammaherpesvirus 4``) and ``NC_009334`` (EBV-2,
+    taxid 12509, rank S2, name ``Human herpesvirus 4 type 2``) are
+    the archetypal pair. The two records appear as separate bars in
+    the Assembly classification chart even though they are the same
+    ICTV species; this function collapses them by walking the
+    ``nodes.dmp`` parent chain until reaching the first ancestor
+    whose rank is ``species``, and using that taxid's scientific
+    name as the canonical label. For the EBV pair both records walk
+    up to taxid 3050299 (rank species, ICTV-binomial name
+    ``Lymphocryptovirus humangamma4``).
 
     Behaviour:
     - Lookup the BLAST hit's accession in ``parquet_df`` -> ``tax_id``.
       Try the raw accession first, then the version-stripped form.
-    - Walk up via ``nodes.dmp`` parent pointers while the current
-      taxid's scientific name is strain-like. Stop at the first
-      ancestor whose name is not strain-like, or when we hit taxid 1
-      (root) without finding one.
+    - Walk up via ``nodes.dmp`` parent pointers until an ancestor
+      whose rank is ``species`` is reached. Fall back to the
+      strain-marker heuristic for taxids that have no species-rank
+      ancestor (older NCBI viral taxonomy entries that NCBI has not
+      yet promoted under the binomial scheme).
     - Replace ``match_name`` with the canonical scientific name; keep
       the raw BLAST title in a new ``match_name_raw`` column for
       audit.
@@ -102,18 +105,22 @@ def canonicalise_blast_match_name(
 
     # Streaming readers for the two dmp files; both are small enough
     # (215 / 290 MB on the current snapshot) for an in-memory load.
-    parent: dict[int, int] = {}
+    # ``nodes.dmp`` is parsed into ``{tid: (parent, rank)}`` so the
+    # walk-up can stop at the first species-rank ancestor (ICTV
+    # binomial) rather than depending on a strain-name heuristic.
+    node_info: dict[int, tuple[int, str]] = {}
     with open(nodes_dmp) as fh:
         for line in fh:
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 2:
+            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
+            parts = stripped.split("\t|\t")
+            if len(parts) < 3:
                 continue
             try:
-                tid = int(parts[0])
-                pid = int(parts[1])
+                tid = int(parts[0].strip())
+                pid = int(parts[1].strip())
             except ValueError:
                 continue
-            parent[tid] = pid
+            node_info[tid] = (pid, parts[2].strip())
 
     sci_name: dict[int, str] = {}
     with open(names_dmp) as fh:
@@ -130,11 +137,35 @@ def canonicalise_blast_match_name(
             sci_name[tid] = parts[1]
 
     def _canonical_taxid(tid: int) -> int:
-        """Walk up while the current name is strain-like."""
+        """Walk up to the first species-rank ancestor.
+
+        If no species-rank ancestor exists within the depth cap (rare
+        — typically only for old NCBI viral genera whose children
+        have no species row yet), fall back to the legacy strain-name
+        heuristic so we never make the label worse than the raw input.
+        """
         seen: set[int] = set()
         current = tid
-        # Cap the walk so a malformed taxdump cannot produce an
-        # infinite loop.
+        for _ in range(64):
+            if current in seen:
+                break
+            seen.add(current)
+            node = node_info.get(current)
+            if node is None:
+                break
+            parent_tid, rank = node
+            if rank == "species":
+                return current
+            if parent_tid == current or parent_tid == 1:
+                break
+            current = parent_tid
+
+        # Fallback: legacy strain-marker heuristic. Walk up while the
+        # name carries a strain / type / isolate marker. Preserves
+        # behaviour for taxids whose species ancestor is missing from
+        # the local taxdump snapshot.
+        seen.clear()
+        current = tid
         for _ in range(64):
             if current in seen:
                 break
@@ -142,10 +173,13 @@ def canonicalise_blast_match_name(
             name = sci_name.get(current, "")
             if not _is_strain_like_name(name):
                 return current
-            nxt = parent.get(current)
-            if nxt is None or nxt == current or nxt == 1:
+            node = node_info.get(current)
+            if node is None:
                 return current
-            current = nxt
+            parent_tid, _rank = node
+            if parent_tid == current or parent_tid == 1:
+                return current
+            current = parent_tid
         return current
 
     canonical_cache: dict[int, str] = {}

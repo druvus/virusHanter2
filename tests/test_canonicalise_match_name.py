@@ -146,6 +146,63 @@ def test_canonicalise_walks_chain_of_strain_like_names(parquet_df, taxdump):
     assert list(out["match_name_raw"]) == ["Some species type 1"]
 
 
+def test_canonicalise_walks_to_species_rank_for_ictv_binomial(tmp_path):
+    """A real-world taxdump puts the ICTV binomial species above the
+    sub-species (S1) and strain (S2) taxids. The canonicaliser must
+    prefer the species-rank ancestor over the strain-marker fallback
+    so the chart shows ``Lymphocryptovirus humangamma4`` instead of
+    ``human gammaherpesvirus 4`` and ``Human herpesvirus 4 type 2``
+    side by side.
+    """
+    nodes_text = (
+        "1\t|\t1\t|\tno rank\t|\t\t|\n"
+        "10375\t|\t1\t|\tgenus\t|\t\t|\n"
+        # ICTV species sits between the genus and the sub-species rows.
+        "3050299\t|\t10375\t|\tspecies\t|\t\t|\n"
+        # NCBI sub-species and strain taxids the BLAST hits resolve to.
+        "10376\t|\t3050299\t|\tno rank\t|\t\t|\n"
+        "12509\t|\t10376\t|\tno rank\t|\t\t|\n"
+    )
+    names_text = (
+        "10375\t|\tLymphocryptovirus\t|\t\t|\tscientific name\t|\n"
+        "3050299\t|\tLymphocryptovirus humangamma4\t|\t\t|\tscientific name\t|\n"
+        "10376\t|\thuman gammaherpesvirus 4\t|\t\t|\tscientific name\t|\n"
+        "12509\t|\tHuman herpesvirus 4 type 2\t|\t\t|\tscientific name\t|\n"
+    )
+    nodes = tmp_path / "nodes.dmp"
+    names = tmp_path / "names.dmp"
+    nodes.write_text(nodes_text)
+    names.write_text(names_text)
+    parquet_df_local = pd.DataFrame(
+        {
+            "name": [
+                "NC_007605.1 Human gammaherpesvirus 4, complete genome",
+                "NC_009334.1 Human herpesvirus 4, complete genome",
+            ],
+            "sequence": ["A", "C"],
+            "tax_id": [10376, 12509],
+        }
+    )
+    blastn = pd.DataFrame(
+        {
+            "name": ["contig_A", "contig_B"],
+            "match_name": [
+                "Human gammaherpesvirus 4, complete genome",
+                "Human herpesvirus 4, complete genome",
+            ],
+            "accession": ["NC_007605", "NC_009334"],
+            "read_len": [3000, 2500],
+        }
+    )
+    out = canonicalise_blast_match_name(
+        blastn, parquet_df_local, str(nodes), str(names)
+    )
+    assert list(out["match_name"]) == [
+        "Lymphocryptovirus humangamma4",
+        "Lymphocryptovirus humangamma4",
+    ]
+
+
 def test_canonicalise_no_taxdump_degrades_gracefully(parquet_df):
     blastn = pd.DataFrame(
         {

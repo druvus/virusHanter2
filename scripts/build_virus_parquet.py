@@ -267,6 +267,47 @@ def find_genus_taxid(
     return 0
 
 
+def find_species_taxid(
+    tid: int,
+    nodes: dict[int, tuple[int, str]],
+    *,
+    depth_limit: int = 20,
+) -> int:
+    """Walk the parent chain from ``tid`` upward and return the first
+    ancestor whose rank is ``species``. Returns ``0`` if no species is
+    found within ``depth_limit`` steps.
+
+    Mirrors ``find_genus_taxid`` but stops at the species rank. Used by
+    the BLAST canonicaliser to collapse sub-species / strain / type
+    taxids onto their ICTV-binomial species (e.g. ``human
+    gammaherpesvirus 4`` (taxid 10376, rank S1) and ``Human herpesvirus
+    4 type 2`` (taxid 12509, rank S2) both walk up to
+    ``Lymphocryptovirus humangamma4`` (taxid 3050299, rank species).
+
+    A taxid that is itself at species rank returns its own value, so
+    the caller can call this unconditionally and use the result as the
+    canonical species taxid.
+    """
+    if tid <= 0 or not nodes:
+        return 0
+    seen: set[int] = set()
+    current = tid
+    for _ in range(depth_limit):
+        if current in seen:
+            return 0
+        seen.add(current)
+        node = nodes.get(current)
+        if node is None:
+            return 0
+        parent, rank = node
+        if rank == "species":
+            return current
+        if parent == current:
+            return 0
+        current = parent
+    return 0
+
+
 def enrich_with_taxdump(
     df: pd.DataFrame, nodes: dict[int, tuple[int, str]]
 ) -> pd.DataFrame:
