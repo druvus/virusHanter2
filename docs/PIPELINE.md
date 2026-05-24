@@ -35,10 +35,20 @@ contig-producing rule below the de novo assemblers runs once per
 ### Classification — `rules/classification.smk`
 
 7. **`kaiju`** + **`kaiju_to_table`** — protein-level taxonomic
-   classification against the configured `KAIJU_DB`.
+   classification against the configured `KAIJU_DB`. When
+   `TAXDUMP_NODES` is set, the rule additionally rewrites the
+   `taxon_name` column to the ICTV-binomial species name via a
+   parent-rank walk-up (see [Canonical species
+   naming](#canonical-species-naming-ictv-binomials) below) and
+   appends an `aliases` column with the legacy NCBI scientific
+   name plus every non-scientific NCBI alias (acronym, common
+   name, equivalent name, ...) for the row's tax_id and its
+   species ancestor.
 8. **`kraken`** + **`wrangle_kraken`** — *k*-mer DNA classification
    against the configured `KRAKEN_DB`; the wrangled CSV adds an
-   explicit `domain` column.
+   explicit `domain` column. Same species walk-up + alias
+   collection as `kaiju_to_table` runs over the `name` column
+   when `TAXDUMP_NODES` is configured.
 
 ### Assembly + annotation — `rules/assembly.smk`
 
@@ -62,7 +72,13 @@ Outputs land under `{sample}/{assembler}/...`.
 12. **`blastn`** — best-hit annotation against `BLASTN_DB`.
 13. **`checkv`** — viral contig contamination / completeness call.
 14. **`merge_checkv_blastn`** — inner join CheckV columns into the
-    BLASTN table. The merged CSV (one per (sample, assembler)) is
+    BLASTN table, then canonicalise `match_name` to the
+    ICTV-binomial species name via the parent-rank walk-up
+    described under [Canonical species naming](#canonical-species-naming-ictv-binomials).
+    The raw BLAST stitle stays in a sibling `match_name_raw`
+    column for audit, and an `aliases` column carries the legacy
+    NCBI scientific name plus the alias categories from
+    `names.dmp`. The merged CSV (one per (sample, assembler)) is
     what the per-sample HTML report and the per-virus aggregator
     consume.
 15. **`genomad`** *(optional)* — second viral-contig classifier
@@ -88,9 +104,12 @@ Outputs land under `{sample}/{assembler}/...`.
     **genus walk-up** (`COVERAGE_GENUS_WALKUP`) substitutes a
     representative genus reference when the exact tax_id is absent
     from the parquet. Emits the BWA index, the per-reference
-    `kraken_top_viruses.fasta`, a `virus_names` sidecar with a
-    `sources` column, and an `unmapped_taxids.tsv` audit trail
-    listing classifier hits that could not be served.
+    `kraken_top_viruses.fasta`, a `virus_names` sidecar with
+    `sources` + `aliases` columns (the latter populated with the
+    legacy + non-scientific NCBI names so the report can render
+    them in the "Also known as" column), and an
+    `unmapped_taxids.tsv` audit trail listing classifier hits
+    that could not be served.
 18. **`mosdepth_kraken_hits`** — per-reference coverage stats with
     `--by COVERAGE_WINDOW` and `--thresholds 1,5,10`. The
     `regions.bed.gz` is consumed by `reporthanter` to render
@@ -113,6 +132,55 @@ Outputs land under `{sample}/{assembler}/...`.
     `MULTIQC: "TRUE"`).
 23. **`clean_everything`** — optional cleanup of intermediates when
     `CLEAN: "TRUE"`.
+
+## Canonical species naming (ICTV binomials)
+
+NCBI's RefSeq keeps multiple records per ICTV species when a
+sequenced isolate or serologically distinct type was registered as
+its own taxon — the EBV pair `NC_007605` (taxid 10376,
+`human gammaherpesvirus 4`) and `NC_009334` (taxid 12509,
+`Human herpesvirus 4 type 2`) is the archetypal example. NCBI's
+taxonomy has since absorbed the ICTV binomial scheme:
+`Lymphocryptovirus humangamma4` (taxid 3050299, rank `species`)
+sits above both records. The pipeline therefore canonicalises
+every classifier and BLAST output to the first species-rank
+ancestor's scientific name so each species shows up under one
+name throughout the report and the per-virus CSVs.
+
+The walk-up is implemented in
+[`scripts/functions.py`](../scripts/functions.py)
+(`find_species_taxid`, `canonicalise_taxon_names`,
+`canonicalise_blast_match_name`) and applied at four points:
+
+- `merge_checkv_blastn` rewrites the BLAST `match_name`.
+- `kaiju_to_table` rewrites `taxon_name`.
+- `wrangle_kraken` rewrites `name`.
+- `bwa_align_to_kraken_hits` writes the `virus_names` sidecar.
+
+Each rewriter additionally appends an `aliases` column carrying
+the legacy NCBI scientific name plus the non-scientific NCBI
+name categories from `names.dmp` (`acronym`, `common name`,
+`genbank common name`, `equivalent name`, `synonym`,
+`genbank synonym`, `genbank acronym`) for both the row's tax_id
+and the species ancestor. The reportHanter package surfaces
+this as the "Also known as" column in the Dashboard top-5
+cards and the Coverage summary tables, so a scientist still
+recognises e.g. `EBV` / `Epstein-Barr virus` / `HHV-4` alongside
+`Lymphocryptovirus humangamma4`.
+
+The pass degrades to a no-op when `TAXDUMP_NODES` is unset or
+the sibling `names.dmp` is missing; the original classifier
+output is left untouched. When a species-rank ancestor cannot
+be reached (a few legacy viral taxa NCBI has not yet
+binomialised), the canonicaliser falls back to the legacy
+strain-marker heuristic (walk while the name carries `type` /
+`strain` / `isolate` / `genotype` / `serotype` / `subtype`).
+
+The raw classifier output and BLAST stitles stay on disk in the
+sibling `_raw` columns / the BLAST `matches` field for audit,
+but reportHanter (>= 0.7.0) hides them from the rendered HTML
+so the viewer does not see two different names for the same
+species.
 
 ## Outputs
 

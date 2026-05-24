@@ -10,7 +10,15 @@ tabular per-batch and per-(sample, virus) summaries.
 
 `virusHanter2` is the modular refactor of the original
 `virusHanter` monolith; HTML rendering is delegated to the
-[`reportHanter`](../reportHanter) package.
+[`reportHanter`](../reportHanter) package. All classifier and
+BLAST outputs are canonicalised to **ICTV-binomial species
+names** via NCBI's taxdump (e.g. `Lymphocryptovirus humangamma4`
+in place of `human gammaherpesvirus 4` and `Human herpesvirus 4
+type 2`), with the legacy NCBI scientific name plus every
+non-scientific NCBI alias (acronym, common name, equivalent
+name) carried alongside in an `aliases` column so the
+report can still surface `EBV`, `Epstein-Barr virus`,
+`HHV-4`, etc. for scientist recognition.
 
 ## Quick start (Linux)
 

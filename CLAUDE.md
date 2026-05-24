@@ -92,6 +92,25 @@ unchanged; trailing additive columns are fine.
   existing column positions and values must stay byte-identical to
   the original `virusHanter` output. Drop new trailing columns
   before diffing.
+- Rules that invoke external tools use `script:` (or `shell:`),
+  not `run:`. Snakemake's `conda:` directive is silently ignored
+  for `run:` blocks, so a `run:` rule that calls a binary from
+  inside Python ends up needing the binary in the *driver* env
+  rather than the per-rule env. The tool-running rules live in
+  `scripts/run_<rule>.py` and take the standard `snakemake`
+  magic object. Pandas-only rules (e.g. `wrangle_pilon`,
+  `merge_checkv_blastn`) may stay as `run:` because pandas is in
+  the driver env.
+- Every classifier and BLAST output is canonicalised to the
+  ICTV-binomial species name via the NCBI taxdump's
+  `find_species_taxid` walk-up; the rewriter also appends an
+  `aliases` column carrying the legacy NCBI scientific name plus
+  the `names.dmp` alias categories (acronym, common name,
+  equivalent name, ...). See
+  [docs/PIPELINE.md#canonical-species-naming-ictv-binomials](docs/PIPELINE.md#canonical-species-naming-ictv-binomials).
+  When adding a new rule that emits a per-tax_id column, run it
+  through `canonicalise_taxon_names` so the report stays
+  consistent.
 
 ## Testing
 
