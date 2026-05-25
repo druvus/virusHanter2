@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/virushanter2_logo.png" alt="virusHanter2" width="640">
+</p>
+
 # virusHanter2
 
 A Snakemake pipeline for viral metagenomics analysis. Paired-end
