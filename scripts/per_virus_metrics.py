@@ -63,14 +63,31 @@ def parse_fastp_total_reads(fastp_json_text: str) -> int:
     return int(doc.get("summary", {}).get("before_filtering", {}).get("total_reads", 0))
 
 
-def kraken_viral_top_n(kraken_df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
-    """Replicate `bwa_align_to_kraken_hits`'s selection: take the rows in
-    the Viruses domain, sort by percent descending, keep the top N.
+_SPECIES_TAX_LEVELS: frozenset[str] = frozenset({"S", "S1", "S2"})
 
-    Returns the same columns as the input, plus a stable `rank` 0..N-1.
+
+def kraken_viral_top_n(kraken_df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
+    """Pick the top ``N`` viral species-rank rows by percent.
+
+    Filter to the Viruses domain *and* to species-rank rows (Kraken
+    ``tax_lvl`` in S, S1, S2), sort by percent descending and keep
+    the top ``N``. The higher-rank ancestor rows (root, domain,
+    phylum, family, genus, ...) carry the same ``count_clades`` as
+    their children via Kraken's clade aggregation; including them
+    in the per-virus CSV would pad every sample with rows for
+    Viruses, Heunggongvirae, Peploviricota, Herpesvirales, etc.
+    that mirror the actual species rows but have no parquet
+    reference and so zero coverage. Reviewers want one row per
+    species, not one row per taxonomic node.
+
+    Returns the same columns as the input, plus a stable ``rank``
+    0..N-1.
     """
     viral = (
-        kraken_df.loc[kraken_df["domain"] == "Viruses"]
+        kraken_df.loc[
+            (kraken_df["domain"] == "Viruses")
+            & (kraken_df["tax_lvl"].isin(_SPECIES_TAX_LEVELS))
+        ]
         .sort_values("percent", ascending=False)
         .head(top_n)
         .reset_index(drop=True)
@@ -228,6 +245,69 @@ def attribute_contigs(
     return by_taxid
 
 
+def _per_row_note(
+    *,
+    sample_note: str,
+    kraken_name: str,
+    kaiju_name: str,
+    virus_reads_kraken: int,
+    contig_count: int,
+    mean_coverage: float,
+    total_length: int,
+) -> str:
+    """Compose the per-row note from a small set of diagnostic rules.
+
+    The sample-level note (set when the BLAST CSV contains only
+    DUMMY_CONTIG rows after a silent MEGAHIT failure) wins outright,
+    because every per-virus row of that sample is suspect. Otherwise
+    flag:
+
+    - ``no contigs attributed despite >=100 Kraken reads`` - the read
+      count says the virus is present but no assembled contig joined
+      its taxid via accession or match_name. Usually means the
+      assembler dropped the contig below the length threshold or the
+      BLAST DB lacks a representative.
+    - ``low Kraken support (<10 reads)`` - the read count is too
+      small to act on alone; treat as a tentative hit.
+    - ``Kraken/Kaiju species disagree`` - both classifiers have a
+      species call but the names differ (after stripping case and
+      common qualifier suffixes). The HSV-2-vs-Chimp-herpes case is
+      the canonical motivating example.
+    - ``mean coverage <1x`` - alignments exist but are too sparse to
+      support a confident call.
+
+    Rules combine with ``"; "`` so the reviewer sees every flag that
+    applies. Empty string when no rule fires.
+    """
+    if sample_note:
+        return sample_note
+    notes: list[str] = []
+    if virus_reads_kraken >= 100 and contig_count == 0:
+        notes.append("no contigs attributed despite >=100 Kraken reads")
+    if virus_reads_kraken < 10:
+        notes.append("low Kraken support (<10 reads)")
+    if kraken_name and kaiju_name:
+        if _normalise_species(kraken_name) != _normalise_species(kaiju_name):
+            notes.append("Kraken/Kaiju species disagree")
+    if total_length > 0 and 0 < mean_coverage < 1.0:
+        notes.append("mean coverage <1x")
+    return "; ".join(notes)
+
+
+def _normalise_species(name: str) -> str:
+    """Lower-case the name and strip the trailing taxonomic qualifiers
+    Kraken / Kaiju attach (``, complete genome``, strain suffixes,
+    leading ``the ``). Lets the disagreement check tolerate cosmetic
+    label drift between the two classifiers without flagging every
+    row.
+    """
+    s = name.strip().lower()
+    for suffix in (", complete genome", ", complete sequence"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].rstrip(", ")
+    return s
+
+
 def parse_genomad_summary(path: Path) -> dict[str, float]:
     """Parse a geNomad ``<sample>_virus_summary.tsv`` into a per-contig
     map of ``{seq_name_first_token: virus_score}``.
@@ -354,14 +434,32 @@ def build_per_virus_rows(
             t = thresholds.get(chrom, {})
             total_ge5x += int(t.get("bases_ge_5x", 0))
         mean_cov = total_bases / total_length if total_length > 0 else 0.0
-        completeness_5x = total_ge5x / total_length if total_length > 0 else 0.0
+        # Completeness reported as a percent (0-100), matching the
+        # convention of the human_reads_percent / non_human_reads_percent
+        # columns and the Coverage tab's pct_ge_5x rendering. Earlier
+        # versions returned a fraction (0-1), which left downstream
+        # consumers having to guess the unit from the value range.
+        completeness_5x_pct = (
+            100.0 * total_ge5x / total_length if total_length > 0 else 0.0
+        )
 
         specific_rpm = (
             virus_reads_kraken * 1_000_000.0 / total_reads if total_reads > 0 else 0.0
         )
 
         kaiju_row = kaiju_by_tid.get(taxid, {})
+        kaiju_name = str(kaiju_row.get("taxon_name", "") or "")
         attributed_contigs = contigs_by_taxid.get(taxid, [])
+
+        row_note = _per_row_note(
+            sample_note=sample_note,
+            kraken_name=str(v.name or ""),
+            kaiju_name=kaiju_name,
+            virus_reads_kraken=virus_reads_kraken,
+            contig_count=len(attributed_contigs),
+            mean_coverage=mean_cov,
+            total_length=total_length,
+        )
 
         # geNomad columns are additive trailing columns: present only
         # when a geNomad summary was supplied. Counts the attributed
@@ -382,10 +480,10 @@ def build_per_virus_rows(
             "human_reads_percent": human_pct,
             "non_human_reads": non_human_reads,
             "non_human_reads_percent": non_human_pct,
-            "note": sample_note,
+            "note": row_note,
             "specific_virus_rpm": specific_rpm,
             "all_virus_rpm": all_virus_rpm,
-            "completeness_5x": completeness_5x,
+            "Completeness (% >5X)": completeness_5x_pct,
             "bases_above_5x": total_ge5x,
             "mean_coverage": mean_cov,
         }
@@ -409,7 +507,30 @@ def build_per_virus_rows(
             row["genomad_viral_contigs"] = len(matched)
             row["genomad_max_virus_score"] = max(matched) if matched else np.nan
         rows.append(row)
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    # Dedupe by virus_name_kraken keeping the row with the most
+    # attributed contigs. The new NCBI viral taxonomy commonly
+    # splits a single species into an S / S1 / S2 chain
+    # (e.g. Simplexvirus humanalpha2 / Human alphaherpesvirus 2 /
+    # strain rows). canonicalise_taxon_names rewrites every row's
+    # ``name`` to the same ICTV binomial, so without dedup the
+    # CSV carries 2-3 near-identical rows per virus where only
+    # one (the leaf with the parquet reference accession) actually
+    # accumulates BLAST + Kaiju + coverage evidence. Keep the
+    # evidence-bearing row; break ties by Kraken read count.
+    df = (
+        df.sort_values(
+            ["contigs", "virus_reads_kraken2"],
+            ascending=False,
+            kind="mergesort",
+        )
+        .drop_duplicates(subset=["virus_name_kraken"], keep="first")
+        .sort_values("virus_reads_kraken2", ascending=False, kind="mergesort")
+        .reset_index(drop=True)
+    )
+    return df
 
 
 # ---------------------------------------------------------------------------

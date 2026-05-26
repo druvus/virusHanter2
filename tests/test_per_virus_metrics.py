@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -81,20 +82,27 @@ def test_parse_fastp_total_reads_reads_before_filtering():
     assert parse_fastp_total_reads(js) == 1820
 
 
-def test_kraken_viral_top_n_sorts_and_truncates():
+def test_kraken_viral_top_n_keeps_species_rank_rows_only():
     df = _kraken_df(
         [
             (10.0, 1000, 1000, "D", 10239, "Viruses", "Viruses"),
+            (10.0, 1000, 1000, "F", 9999, "Some viral family", "Viruses"),
             (5.0, 500, 500, "S", 100001, "Phage X", "Viruses"),
             (60.0, 6000, 6000, "S", 100002, "Phage Y", "Viruses"),
+            (45.0, 4500, 4500, "S1", 100004, "Phage Y subsp", "Viruses"),
+            (40.0, 4000, 4000, "S2", 100005, "Phage Y strain", "Viruses"),
             (1.0, 100, 100, "S", 100003, "Phage Z", "Viruses"),
             (90.0, 9000, 9000, "D", 2, "Bacteria", "Bacteria"),
         ]
     )
-    top = kraken_viral_top_n(df, top_n=2)
-    # Sorted by percent desc: 60% (100002) then 10% (10239).
-    assert list(top["taxonomy_id"]) == [100002, 10239]
-    assert list(top["rank"]) == [0, 1]
+    top = kraken_viral_top_n(df, top_n=3)
+    # Sorted by percent desc, restricted to tax_lvl in {S, S1, S2} and
+    # to the Viruses domain. Top 3: 60% S, 45% S1, 40% S2.
+    # The 10% Viruses Domain (D) row and the 10% family (F) row are
+    # filtered out by the species-rank guard; the bacterial row is
+    # filtered out by the domain guard.
+    assert list(top["taxonomy_id"]) == [100002, 100004, 100005]
+    assert list(top["rank"]) == [0, 1, 2]
 
 
 def test_kaiju_lookup_indexes_by_taxon_id_and_skips_na():
@@ -243,23 +251,20 @@ def test_build_per_virus_rows_aggregates_multi_reference_taxid(tmp_path):
         human_reads=2000,
         top_n=20,
     )
-    # One row per kraken viral taxid. The pipeline's existing
-    # `bwa_align_to_kraken_hits` selection rule (Domain == "Viruses",
-    # top-N by percent) also returns the Domain "Viruses" row itself,
-    # so it appears here too with no reference / coverage.
-    assert set(df["virus_taxid"]) == {42, 7, 10239}
+    # One row per kraken viral species (tax_lvl S/S1/S2). The
+    # Domain "Viruses" row and any higher-rank ancestor rows are
+    # filtered out so the per-virus CSV stays one-row-per-species.
+    assert set(df["virus_taxid"]) == {42, 7}
     row_a = df.loc[df["virus_taxid"] == 42].iloc[0]
     row_b = df.loc[df["virus_taxid"] == 7].iloc[0]
-    row_domain = df.loc[df["virus_taxid"] == 10239].iloc[0]
-    assert row_domain["mean_coverage"] == 0.0
-    assert row_domain["bases_above_5x"] == 0
 
     # Phage A spans NC_001 (length 1000) + NC_002 (length 2000) = 3000
     # bases of reference, 4000 + 16000 = 20000 bases aligned.
     assert row_a["mean_coverage"] == 20000 / 3000
-    # bases_above_5x = 200 + 1500 = 1700; completeness = 1700/3000.
+    # bases_above_5x = 200 + 1500 = 1700; completeness = 1700/3000
+    # rendered as a percent (0-100).
     assert row_a["bases_above_5x"] == 1700
-    assert abs(row_a["completeness_5x"] - 1700 / 3000) < 1e-9
+    assert abs(row_a["Completeness (% >5X)"] - 100 * 1700 / 3000) < 1e-9
     # Both NC_001 and NC_002 BLASTN hits attribute to taxid 42.
     assert row_a["contigs"] == 2
     assert row_a["virus_name_kaiju"] == "Phage A"
@@ -310,9 +315,12 @@ def test_build_per_virus_rows_viral_only_kraken_uses_r1_anchor():
         human_reads=30,
         top_n=10,
     )
-    # The R1 anchor must surface "Viruses" as a row, and the
-    # all_virus_rpm must reflect the 970 reads from the R1 row's
-    # count_clades (not 0 as it would be with a D-only anchor).
+    # The R1 anchor is used to derive all_viral_reads (970), but the
+    # R1 row itself does not appear in the per-virus DataFrame
+    # because the species-rank filter rejects R1. Only Phage A (S)
+    # survives the filter; its all_virus_rpm must still reflect the
+    # 970 reads from the R1 row's count_clades (not 0 as it would
+    # be with a D-only anchor).
     row = df.loc[df["virus_name_kraken"] == "Phage A"].iloc[0]
     assert row["all_virus_rpm"] == 970 * 1_000_000.0 / 1000
     assert row["other_reads"] == (1000 - 30) - 970
@@ -355,6 +363,144 @@ def test_build_per_virus_rows_flags_dummy_contig_in_note():
     )
     assert not df.empty
     assert (df["note"] == "MEGAHIT assembly failed; dummy contig only").all()
+
+
+def test_build_per_virus_rows_dedupes_by_virus_name_keeping_max_contigs():
+    """Kraken's S / S1 / S2 sub-rank chain often produces multiple
+    rows that all canonicalise to the same virus name. The output
+    should keep one row per virus_name_kraken - the one carrying
+    the most attributed contigs (typically the S1 leaf where the
+    parquet reference accession lives)."""
+    kraken = _kraken_df(
+        [
+            # ICTV root (S) - no parquet reference, no contigs.
+            (60.0, 600, 0, "S", 3050293, "Phage A", "Viruses"),
+            # Legacy NCBI name (S1) - parquet keys here; contigs land here.
+            (60.0, 600, 600, "S1", 42, "Phage A", "Viruses"),
+            # Strain (S2) - no parquet reference.
+            (5.0, 50, 50, "S2", 99999, "Phage A", "Viruses"),
+            # Distinct virus, single row.
+            (10.0, 100, 100, "S", 7, "Phage B", "Viruses"),
+        ]
+    )
+    blastn = pd.DataFrame(
+        {
+            "name": ["k57_0_pilon", "k57_1_pilon", "k57_2_pilon"],
+            "match_name": ["Phage A", "Phage A", "Phage A"],
+            "accession": ["NC_001.1", "NC_001.1", "NC_001.1"],
+        }
+    )
+    df = build_per_virus_rows(
+        run_name="x",
+        sample_name="s",
+        kraken_df=kraken,
+        kaiju_df=pd.DataFrame(),
+        blastn_df=blastn,
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={},
+        thresholds={},
+        total_reads=1000,
+        human_reads=0,
+        top_n=10,
+    )
+    # Two viruses survive: Phage A and Phage B. Phage A's three
+    # taxonomic rows collapse to the S1 row with the 3 contigs.
+    assert len(df) == 2
+    phage_a = df.loc[df["virus_name_kraken"] == "Phage A"].iloc[0]
+    assert phage_a["virus_taxid"] == 42
+    assert phage_a["contigs"] == 3
+
+
+def _build_minimal(
+    kraken_rows,
+    *,
+    kaiju_df=None,
+    blastn_df=None,
+    parquet_df=None,
+    summary=None,
+    thresholds=None,
+    total_reads=1000,
+    human_reads=0,
+):
+    """Boilerplate-free wrapper around ``build_per_virus_rows`` for the
+    note-rule tests. Each rule only needs a tiny subset of the full
+    input set, so the defaults are empty frames / empty dicts."""
+    return build_per_virus_rows(
+        run_name="x",
+        sample_name="s",
+        kraken_df=_kraken_df(kraken_rows),
+        kaiju_df=kaiju_df if kaiju_df is not None else pd.DataFrame(),
+        blastn_df=blastn_df if blastn_df is not None else pd.DataFrame(),
+        parquet_df=parquet_df if parquet_df is not None else pd.DataFrame(),
+        summary=summary or {},
+        thresholds=thresholds or {},
+        total_reads=total_reads,
+        human_reads=human_reads,
+        top_n=10,
+    )
+
+
+@pytest.mark.parametrize(
+    "kraken_rows,expected_note",
+    [
+        pytest.param(
+            [(5.0, 7, 7, "S", 42, "Phage A", "Viruses")],
+            "low Kraken support (<10 reads)",
+            id="low-kraken-support",
+        ),
+        pytest.param(
+            [(50.0, 500, 500, "S", 42, "Phage A", "Viruses")],
+            "no contigs attributed despite >=100 Kraken reads",
+            id="no-contigs-despite-reads",
+        ),
+    ],
+)
+def test_per_row_note_simple_rules(kraken_rows, expected_note):
+    """Note rules that need only a Kraken row to fire."""
+    df = _build_minimal(kraken_rows)
+    assert df.iloc[0]["note"] == expected_note
+
+
+def test_per_row_note_flags_kraken_kaiju_disagreement():
+    """Both classifiers have a species call but the names differ
+    after normalisation - flag the disagreement."""
+    df = _build_minimal(
+        [(50.0, 500, 500, "S", 42, "Simplexvirus paninealpha3", "Viruses")],
+        kaiju_df=pd.DataFrame(
+            {
+                "file": ["a"],
+                "percent": [50.0],
+                "reads": [500],
+                "taxon_id": [42],
+                "taxon_name": ["Simplexvirus humanalpha2"],
+            }
+        ),
+    )
+    assert "Kraken/Kaiju species disagree" in df.iloc[0]["note"]
+
+
+def test_per_row_note_flags_low_mean_coverage():
+    """Mean coverage strictly between 0 and 1x should fire the
+    'mean coverage <1x' rule. Reference length zero is silent (no
+    parquet reference means the rule cannot meaningfully fire)."""
+    df = _build_minimal(
+        [(50.0, 500, 500, "S", 42, "Phage A", "Viruses")],
+        blastn_df=pd.DataFrame(
+            {
+                "name": ["k57_0_pilon"] * 200,
+                "match_name": ["Phage A"] * 200,
+                "accession": ["NC_001.1"] * 200,
+            }
+        ),
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={"NC_001": {"length": 1000, "bases": 500, "mean": 0.5}},
+        thresholds={"NC_001": {"bases_ge_1x": 100, "bases_ge_5x": 0, "bases_ge_10x": 0}},
+    )
+    assert "mean coverage <1x" in df.iloc[0]["note"]
 
 
 def test_build_per_virus_rows_real_contigs_leave_note_empty():
