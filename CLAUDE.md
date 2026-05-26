@@ -151,10 +151,14 @@ When the CheckV DB is stubbed, the smoke degrades automatically to
 
 `refresh/refresh_virus_parquet.smk` is a standalone Snakemake
 workflow (not part of the main pipeline DAG) that rebuilds
-`VIRUS_PARQUET` and the matching Kaiju FMI index from the same
-NCBI viral RefSeq snapshot, downloads the taxdump, and emits an
-overlap-with-Kraken2 diagnostic sidecar. Driven by
-`refresh/config.yaml`. Helpers live at
+`VIRUS_PARQUET`, the matching Kaiju FMI index, the Kraken2 viral
+DB and the BLAST viral DB tarballs from the same NCBI viral
+RefSeq snapshot, downloads the taxdump, and emits an
+overlap-with-Kraken2 diagnostic sidecar. Building Kraken2 from
+the same RefSeq pull closes the recurring gap where the publicly
+hosted `k2_viral_*` snapshots occasionally omit individual
+genomes (e.g. the Feb 2026 snapshot missed HSV-2 / NC_001798).
+Driven by `refresh/config.yaml`. Helpers live at
 `scripts/build_virus_parquet.py`,
 `scripts/reformat_kaiju_headers.py`,
 `scripts/compare_parquet_kraken2.py`. See

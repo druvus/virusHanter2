@@ -2,10 +2,12 @@
 #
 # Standalone Snakemake workflow that rebuilds VIRUS_PARQUET from
 # NCBI viral RefSeq and additionally builds a locally-tuned Kaiju
-# FMI index plus an overlap-with-Kraken2 sidecar. Kept separate
-# from the main pipeline DAG because the refresh is an operator
-# task that runs on a different cadence (quarterly to
-# half-yearly).
+# FMI index, a locally-tuned Kraken2 viral DB, a BLAST viral
+# snapshot, and an overlap-with-Kraken2 sidecar - all from the
+# same RefSeq snapshot so the four classifier reference sets stay
+# in lockstep. Kept separate from the main pipeline DAG because
+# the refresh is an operator task that runs on a different
+# cadence (quarterly to half-yearly).
 #
 # Usage:
 #
@@ -89,6 +91,19 @@ KAIJU_BUILD_PREFIX = DOWNLOAD_DIR / "kaiju_refseq_viral"
 KAIJU_BUILD_FMI = DOWNLOAD_DIR / "kaiju_refseq_viral.fmi"
 KAIJU_BUILD_FAA = DOWNLOAD_DIR / "kaiju_refseq_viral.faa"
 
+# Kraken2 build artefacts. The DB is built from the same RefSeq
+# viral nucleotide FASTA the parquet consumes, so the Kraken2
+# taxid universe stays in lockstep with the Kaiju FMI, the
+# parquet, and the BLAST DB. The motivating gap was the
+# downloaded prebuilt k2_viral snapshot missing HSV-2
+# (NC_001798); building from our own RefSeq pull closes that gap.
+KRAKEN_BUILD_DIR = DOWNLOAD_DIR / "kraken2_refseq_viral"
+KRAKEN_BUILD_HASH = KRAKEN_BUILD_DIR / "hash.k2d"
+KRAKEN_BUILD_TAXO = KRAKEN_BUILD_DIR / "taxo.k2d"
+KRAKEN_BUILD_OPTS = KRAKEN_BUILD_DIR / "opts.k2d"
+KRAKEN_BUILD_SEQID = KRAKEN_BUILD_DIR / "seqid2taxid.map"
+KRAKEN_BUILD_INSPECT = KRAKEN_BUILD_DIR / "inspect.txt"
+
 # Published paths next to the parquet so the main pipeline's
 # TAXDUMP_NODES and KAIJU_DB config keys can point at stable
 # locations that survive the temporary download workdir.
@@ -110,6 +125,15 @@ KAIJU_PUBLISHED_FMI = KAIJU_PUBLISH_DIR / "kaiju_refseq_viral.fmi"
 KAIJU_PUBLISHED_NODES = KAIJU_PUBLISH_DIR / "nodes.dmp"
 KAIJU_PUBLISHED_NAMES = KAIJU_PUBLISH_DIR / "names.dmp"
 
+# Published Kraken2 DB lives next to the Kaiju FMI so the main
+# pipeline's KRAKEN_DB key can point at a stable location.
+KRAKEN_PUBLISH_DIR = PARQUET_PARENT / "kraken2_refseq_viral"
+KRAKEN_PUBLISHED_HASH = KRAKEN_PUBLISH_DIR / "hash.k2d"
+KRAKEN_PUBLISHED_TAXO = KRAKEN_PUBLISH_DIR / "taxo.k2d"
+KRAKEN_PUBLISHED_OPTS = KRAKEN_PUBLISH_DIR / "opts.k2d"
+KRAKEN_PUBLISHED_SEQID = KRAKEN_PUBLISH_DIR / "seqid2taxid.map"
+KRAKEN_PUBLISHED_INSPECT = KRAKEN_PUBLISH_DIR / "inspect.txt"
+
 # Overlap-with-Kraken2 sidecar lives next to the parquet.
 OVERLAP_TSV = OUTPUT_PARQUET.with_name(OUTPUT_PARQUET.stem + "_vs_kraken2.tsv")
 
@@ -123,6 +147,11 @@ rule all:
         str(KAIJU_PUBLISHED_FMI),
         str(KAIJU_PUBLISHED_NODES),
         str(KAIJU_PUBLISHED_NAMES),
+        str(KRAKEN_PUBLISHED_HASH),
+        str(KRAKEN_PUBLISHED_TAXO),
+        str(KRAKEN_PUBLISHED_OPTS),
+        str(KRAKEN_PUBLISHED_SEQID),
+        str(KRAKEN_PUBLISHED_INSPECT),
         str(OVERLAP_TSV),
         str(BLAST_SNAPSHOT_TSV),
         str(BLAST_VIRAL_ALIAS),
@@ -437,6 +466,113 @@ rule publish_kaiju_refseq_viral:
         cp {input.fmi} {output.fmi}
         cp {input.nodes} {output.nodes}
         cp {input.names} {output.names}
+        """
+
+
+rule build_kraken2_refseq_viral:
+    """Build a Kraken2 viral DB from the same RefSeq viral
+    nucleotide FASTA the parquet builds from.
+
+    Kraken2 expects three things in its DB's taxonomy/ folder:
+    nodes.dmp, names.dmp and an accession2taxid table. We seed
+    them from the downloads above and touch the three .dlflag
+    markers so kraken2-build skips its own NCBI fetch step.
+    --add-to-library then ingests the concatenated viral FASTA,
+    using the accession2taxid file to assign every record a
+    taxid. --build hashes the k-mers, writing hash.k2d /
+    taxo.k2d / opts.k2d / seqid2taxid.map. --no-masking skips
+    dustmasker (which would otherwise require pulling the
+    blast+ env's dustmasker into refresh.yaml and adds little
+    for viral references that are already low-complexity-poor).
+
+    Motivating gap: the publicly hosted k2_viral_20260226
+    snapshot omitted NC_001798 (HSV-2). Building from our own
+    RefSeq pull closes that gap and keeps Kraken2's taxid
+    universe in lockstep with Kaiju + parquet + BLAST.
+    """
+    input:
+        fasta=rules.decompress_fasta.output.fasta,
+        nucl_taxid=rules.download_accession2taxid.output.gz,
+        nodes=rules.decompress_taxdump.output.nodes,
+        names=rules.decompress_taxdump.output.names,
+    output:
+        hash=str(KRAKEN_BUILD_HASH),
+        taxo=str(KRAKEN_BUILD_TAXO),
+        opts=str(KRAKEN_BUILD_OPTS),
+        seqid=str(KRAKEN_BUILD_SEQID),
+        inspect=str(KRAKEN_BUILD_INSPECT),
+    params:
+        db_dir=str(KRAKEN_BUILD_DIR),
+    threads: 4
+    log:
+        str(DOWNLOAD_DIR / "logs" / "build_kraken2.log"),
+    conda:
+        "../envs/refresh.yaml"
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p {params.db_dir}/taxonomy $(dirname {log})
+
+        # Seed Kraken2's taxonomy/ folder. The .dlflag /
+        # .untarflag markers tell kraken2-build the downloads
+        # are already in place so it skips its own NCBI fetch.
+        cp {input.nodes} {params.db_dir}/taxonomy/nodes.dmp
+        cp {input.names} {params.db_dir}/taxonomy/names.dmp
+        gunzip -c {input.nucl_taxid} \
+            > {params.db_dir}/taxonomy/nucl_gb.accession2taxid
+        touch {params.db_dir}/taxonomy/accmap.dlflag
+        touch {params.db_dir}/taxonomy/taxdump.dlflag
+        touch {params.db_dir}/taxonomy/taxdump.untarflag
+
+        # Ingest the viral FASTA. --add-to-library uses the
+        # accession2taxid table to map each record's accession to
+        # the right taxid; records whose accession is missing land
+        # under taxid 0 and are silently dropped at build time.
+        kraken2-build --no-masking \
+            --add-to-library {input.fasta} \
+            --db {params.db_dir} \
+            >> {log} 2>&1
+
+        # Build the k-mer hash. Threads parallelise k-mer
+        # extraction and BWT sort; memory peak is ~3-4x the input
+        # FASTA size.
+        kraken2-build --build \
+            --db {params.db_dir} \
+            --threads {threads} \
+            >> {log} 2>&1
+
+        # Companion inspect.txt sidecar - mirrors the file
+        # shipped with the downloaded prebuilt DB and lets the
+        # operator audit the taxid roster without rebuilding.
+        kraken2-inspect --db {params.db_dir} \
+            > {output.inspect} 2>> {log}
+        """
+
+
+rule publish_kraken2_refseq_viral:
+    """Copy the built Kraken2 DB next to the parquet so the main
+    pipeline's KRAKEN_DB key can point at a stable location that
+    matches the Kaiju FMI's RefSeq snapshot."""
+    input:
+        hash=rules.build_kraken2_refseq_viral.output.hash,
+        taxo=rules.build_kraken2_refseq_viral.output.taxo,
+        opts=rules.build_kraken2_refseq_viral.output.opts,
+        seqid=rules.build_kraken2_refseq_viral.output.seqid,
+        inspect=rules.build_kraken2_refseq_viral.output.inspect,
+    output:
+        hash=str(KRAKEN_PUBLISHED_HASH),
+        taxo=str(KRAKEN_PUBLISHED_TAXO),
+        opts=str(KRAKEN_PUBLISHED_OPTS),
+        seqid=str(KRAKEN_PUBLISHED_SEQID),
+        inspect=str(KRAKEN_PUBLISHED_INSPECT),
+    shell:
+        """
+        mkdir -p $(dirname {output.hash})
+        cp {input.hash} {output.hash}
+        cp {input.taxo} {output.taxo}
+        cp {input.opts} {output.opts}
+        cp {input.seqid} {output.seqid}
+        cp {input.inspect} {output.inspect}
         """
 
 

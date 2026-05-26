@@ -25,14 +25,18 @@ single coordinated snapshot keeps the diagnostic load light.
 
 The refresh workflow at
 [`refresh/refresh_virus_parquet.smk`](../refresh/refresh_virus_parquet.smk)
-rebuilds the parquet and the Kaiju FM-index from the same NCBI
-viral RefSeq snapshot, downloads the matching taxdump
-(`nodes.dmp` + `names.dmp`) and pulls the production Kraken2
-viral tarball, then emits an overlap-with-Kraken2 sidecar so the
-operator can see at a glance which tax_ids are covered by which
-classifier. The workflow also drives `update_blastdb.pl` so the
-viral BLAST DB tarballs share the same snapshot as the parquet
-and the Kaiju FMI; no separate manual step is required.
+rebuilds the parquet, the Kaiju FM-index and the Kraken2 viral
+DB from the same NCBI viral RefSeq snapshot, downloads the
+matching taxdump (`nodes.dmp` + `names.dmp`), and emits an
+overlap-with-Kraken2 sidecar so the operator can see at a glance
+which tax_ids are covered by which classifier. The workflow also
+drives `update_blastdb.pl` so the viral BLAST DB tarballs share
+the same snapshot as the parquet, the Kaiju FMI and the Kraken2
+DB; no separate manual step is required. Building Kraken2 from
+the same RefSeq pull closes the recurring gap where the publicly
+hosted `k2_viral_*` snapshots occasionally omit individual
+genomes (e.g. the Feb 2026 snapshot missed HSV-2 / NC_001798
+while the matching parquet and Kaiju FMI both included it).
 
 ## What you need before you start
 
@@ -99,15 +103,31 @@ sequence is:
    then `kaiju-mkbwt` and `kaiju-mkfmi` build the index. The
    resulting `kaiju_refseq_viral.fmi` is published next to the
    parquet alongside `nodes.dmp` and `names.dmp`.
-5. **Publish** the `nodes.dmp` to a stable path next to the
+5. **Build the Kraken2 viral DB** from the same nucleotide
+   FASTA. The rule seeds Kraken2's `taxonomy/` folder with the
+   already-downloaded `nodes.dmp`, `names.dmp` and decompressed
+   `nucl_gb.accession2taxid`, then runs `kraken2-build
+   --add-to-library` followed by `kraken2-build --build` to hash
+   the k-mers. The built DB (`hash.k2d`, `taxo.k2d`, `opts.k2d`,
+   `seqid2taxid.map`, `inspect.txt`) is published to
+   `kraken2_refseq_viral/` next to the parquet so the main
+   pipeline's `KRAKEN_DB` key can point at a snapshot that
+   matches the Kaiju FMI's taxid universe.
+6. **Publish** the `nodes.dmp` to a stable path next to the
    parquet so the main pipeline's `TAXDUMP_NODES` config key can
    point at it without re-extracting the tar.
-6. **Compare with Kraken2** via
+7. **Compare with Kraken2** via
    [`scripts/compare_parquet_kraken2.py`](../scripts/compare_parquet_kraken2.py):
    call `kraken2-inspect` against the configured production
    Kraken2 DB and emit `all_viruses_vs_kraken2.tsv` next to the
    parquet, plus add overlap counters to `build_stats.json`.
-7. **Refresh the BLAST viral DB tarballs** via
+   When `KRAKEN_DB_FOR_COMPARE` is left pointing at the
+   downloaded prebuilt DB (the default), the sidecar quantifies
+   the gap between the prebuilt snapshot and the newly built
+   `kraken2_refseq_viral/` DB; update the key after the first
+   successful local build to compare your own snapshot against
+   itself as a regression check.
+8. **Refresh the BLAST viral DB tarballs** via
    `update_blastdb.pl` (BLAST+ ships the script). Fetches
    `ref_viruses_rep_genomes`, `mito_rna_db` and `taxdb` from
    NCBI's pre-built tarballs into a sibling directory next to the
@@ -134,6 +154,12 @@ After a successful refresh the parquet's directory looks like:
 │   ├── kaiju_refseq_viral.fmi        (~250 MB)
 │   ├── nodes.dmp
 │   └── names.dmp
+├── kraken2_refseq_viral/
+│   ├── hash.k2d                       (~600 MB)
+│   ├── taxo.k2d
+│   ├── opts.k2d
+│   ├── seqid2taxid.map
+│   └── inspect.txt                    (taxid roster sidecar)
 └── blast_refseq_viral/
     ├── viral_rna_mito.nal             (the alias the main pipeline points at)
     ├── ref_viruses_rep_genomes.*      (BLAST index files from NCBI's tarball)
