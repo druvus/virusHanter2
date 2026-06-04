@@ -43,8 +43,8 @@ rule bwa_align_to_kraken_hits:
             f"{RESULT_FOLDER}/{{{{sample}}}}/{{assembler}}/CHECKV/{{{{sample}}}}.merged.csv",
             assembler=ASSEMBLERS,
         ),
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         virus_fasta=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_viruses.fasta",
         virus_names=f"{RESULT_FOLDER}/{{sample}}/BWA_KRAKEN/kraken_top_virus_names.tsv",
@@ -114,7 +114,7 @@ rule mosdepth_kraken_hits:
 # `assembler` column on the contig table.
 rule generate_report:
     input:
-        flagstat=lambda wildcards: host_flagstat(wildcards),
+        flagstat=host_flagstat,
         secondary_flagstat=rules.remove_secondary_host.output.flagstat,
         fastp_json=rules.fastp.output.json_report,
         blastn_csvs=expand(
@@ -228,7 +228,7 @@ rule per_virus_metrics:
         mosdepth_summary=rules.mosdepth_kraken_hits.output.summary,
         mosdepth_thresholds=rules.mosdepth_kraken_hits.output.thresholds,
         fastp_json=rules.fastp.output.json_report,
-        flagstat=lambda wildcards: host_flagstat(wildcards),
+        flagstat=host_flagstat,
         virus_parquet=VIRUS_PARQUET,
         # When geNomad is enabled, take every per-assembler summary as
         # an extra input. Evaluated at rule-build time.

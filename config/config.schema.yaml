@@ -234,6 +234,8 @@ properties:
       config.
   HOST_REMOVAL:
     type: string
+    # Keep this enum in sync with the _HOST_BACKENDS dispatch table in
+    # rules/pre_processing.smk when adding or removing a backend.
     enum: ["bwa", "hostile"]
     default: "bwa"
     description: |

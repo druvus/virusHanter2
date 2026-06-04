@@ -289,15 +289,10 @@ COVERAGE_GENUS_WALKUP = config.get("COVERAGE_GENUS_WALKUP", "TRUE") == "TRUE"
 # Host-removal backend: "bwa" (parity default) or "hostile" (T2T-CHM13
 # via minimap2; opt-in for clinical samples where the extra
 # telomeric/pericentromeric host removal matters). The pre_processing
-# module re-reads this from `config[HOST_REMOVAL]` and exposes
-# helpers `host_removed_r1` / `host_removed_r2` / `host_flagstat`
-# that resolve to the active backend's outputs.
-HOST_REMOVAL = config.get("HOST_REMOVAL", "bwa")
-if HOST_REMOVAL not in ("bwa", "hostile"):
-    raise WorkflowError(
-        f"Unknown HOST_REMOVAL backend: {HOST_REMOVAL!r}. "
-        "Valid choices are 'bwa' and 'hostile'."
-    )
+# module owns the backend dispatch table `_HOST_BACKENDS`, validates
+# `config[HOST_REMOVAL]` against it, and exposes the helpers
+# `host_removed_r1` / `host_removed_r2` / `host_flagstat` that resolve
+# to the active backend's outputs.
 
 # Include rule files
 include: "rules/pre_processing.smk"

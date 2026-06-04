@@ -24,35 +24,72 @@ DEDUPLICATE = config.get("DEDUPLICATE", "FALSE") == "TRUE"
 
 # Host-removal backend. "bwa" is the parity default (bwa mem -k 26 +
 # samtools); "hostile" calls Bede et al.'s hostile against the
-# bundled T2T-CHM13 reference. Helpers below pick the output path
-# from whichever backend is active; the lambda inputs scattered
-# across the other .smk files use them rather than hard-coding
-# `rules.bam_to_fastq_human.output`.
+# bundled T2T-CHM13 reference. Backend selection lives in one dispatch
+# table, `_HOST_BACKENDS`: each entry maps a backend name to the rule
+# outputs for its host-removed R1/R2 streams and its primary flagstat.
+# Adding a backend means adding its rule plus one entry here; the
+# helpers below and the input functions scattered across the other
+# .smk files resolve through the table and need no changes.
 HOST_REMOVAL = config.get("HOST_REMOVAL", "bwa")
 HOSTILE_INDEX = config.get("HOSTILE_INDEX", "")
 
+# The values are nullary callables so that `rules.*.output` is only
+# dereferenced at input-resolution time (after every rule is defined),
+# not while this module is being parsed.
+_HOST_BACKENDS = {
+    "bwa": lambda: {
+        "r1": rules.bam_to_fastq_human.output.r1,
+        "r2": rules.bam_to_fastq_human.output.r2,
+        "flagstat": rules.remove_host.output.flagstat,
+    },
+    "hostile": lambda: {
+        "r1": rules.hostile_human.output.r1,
+        "r2": rules.hostile_human.output.r2,
+        "flagstat": rules.hostile_human.output.flagstat,
+    },
+}
 
-def host_removed_r1(wildcards):
+# Backstop validation. The config schema's HOST_REMOVAL enum
+# (config/config.schema.yaml) is the primary, user-facing gate and
+# fires first at validate(); this guard only triggers on a
+# schema/registry mismatch (a backend the schema allows but that has
+# no dispatch entry), turning a cryptic KeyError at input-resolution
+# time into a clear message. Keep the schema enum and the
+# _HOST_BACKENDS keys in sync when adding a backend.
+if HOST_REMOVAL not in _HOST_BACKENDS:
+    raise WorkflowError(
+        f"Unknown HOST_REMOVAL backend: {HOST_REMOVAL!r}. "
+        f"Valid choices are {sorted(_HOST_BACKENDS)}."
+    )
+
+
+def _primary_host(stream):
+    """Return the active primary backend's output for `stream`.
+
+    `stream` is one of "r1", "r2" or "flagstat". The secondary-host
+    layer, when enabled, overrides the R1/R2 streams in the helpers
+    below; the primary flagstat is always the primary backend's.
+    """
+    return _HOST_BACKENDS[HOST_REMOVAL]()[stream]
+
+
+def host_removed_r1(wildcards=None):
     """Resolve the FASTQ path for the host-removed R1 stream.
 
     Honours both `SECONDARY_HOST_OR_NOT` (which adds a second host
-    layer) and `HOST_REMOVAL` (bwa vs hostile for the primary
-    host). Used by every downstream consumer that previously
-    referenced `rules.bam_to_fastq_human.output.r1` directly.
+    layer and wins when set) and `HOST_REMOVAL` (the primary backend).
+    Used by every downstream consumer that previously referenced
+    `rules.bam_to_fastq_human.output.r1` directly.
     """
     if SECONDARY_HOST_OR_NOT:
         return rules.bam_to_fastq_secondary.output.r1
-    if HOST_REMOVAL == "hostile":
-        return rules.hostile_human.output.r1
-    return rules.bam_to_fastq_human.output.r1
+    return _primary_host("r1")
 
 
-def host_removed_r2(wildcards):
+def host_removed_r2(wildcards=None):
     if SECONDARY_HOST_OR_NOT:
         return rules.bam_to_fastq_secondary.output.r2
-    if HOST_REMOVAL == "hostile":
-        return rules.hostile_human.output.r2
-    return rules.bam_to_fastq_human.output.r2
+    return _primary_host("r2")
 
 
 def host_flagstat(wildcards=None):
@@ -63,9 +100,7 @@ def host_flagstat(wildcards=None):
     `samtools flagstat` directly, the hostile backend uses hostile's
     own stats output reformatted to the flagstat shape.
     """
-    if HOST_REMOVAL == "hostile":
-        return rules.hostile_human.output.flagstat
-    return rules.remove_host.output.flagstat
+    return _primary_host("flagstat")
 
 # Rule: Quality control with fastp
 rule fastp:

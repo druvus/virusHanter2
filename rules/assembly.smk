@@ -105,8 +105,8 @@ def assembler_contigs(wildcards):
 # Rule: De novo assembly with MEGAHIT
 rule megahit:
     input:
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         contigs=f"{RESULT_FOLDER}/{{sample}}/MEGAHIT/{{sample}}.contigs.fa",
     params:
@@ -134,8 +134,8 @@ rule megahit:
 # not need to special-case an absent SPAdes output.
 rule metaspades:
     input:
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         contigs=f"{RESULT_FOLDER}/{{sample}}/metaSPAdes/{{sample}}.contigs.fa",
     params:
@@ -163,8 +163,8 @@ rule metaspades:
 # uniform.
 rule rnaviralspades:
     input:
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         contigs=f"{RESULT_FOLDER}/{{sample}}/rnaviralSPAdes/{{sample}}.contigs.fa",
     params:
@@ -218,8 +218,8 @@ rule quast_per_assembler:
 rule pilon:
     input:
         contigs=assembler_contigs,
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         contigs_bam=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_contigs.bam",
         improved_contigs=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}_improved_contigs.fasta",

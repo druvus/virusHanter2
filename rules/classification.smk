@@ -32,8 +32,8 @@ def _kaiju_nodes(wildcards):
 # Rule: Kaiju classification
 rule kaiju:
     input:
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
         fmi=_kaiju_fmi,
         nodes=_kaiju_nodes,
     output:
@@ -84,8 +84,8 @@ rule kaiju_to_table:
 # Rule: Kraken2 classification
 rule kraken:
     input:
-        r1=lambda wildcards: host_removed_r1(wildcards),
-        r2=lambda wildcards: host_removed_r2(wildcards),
+        r1=host_removed_r1,
+        r2=host_removed_r2,
     output:
         kraken_report=f"{RESULT_FOLDER}/{{sample}}/KRAKEN/{{sample}}.kraken.report",
     params:
