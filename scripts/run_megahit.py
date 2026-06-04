@@ -12,7 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from scripts.functions import assembler_max_attempts, write_dummy_contig
+from scripts.assembler_utils import assembler_max_attempts, write_dummy_contig
 
 snakemake = snakemake  # type: ignore[name-defined]
 
