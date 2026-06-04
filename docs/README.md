@@ -9,9 +9,10 @@ that is too long to keep there.
 
 | Topic | File |
 |---|---|
+| **Database setup — all 9 databases, sources, build commands** | [DATABASE_SETUP.md](DATABASE_SETUP.md) |
 | Pipeline stages, the `{assembler}` wildcard, output tree | [PIPELINE.md](PIPELINE.md) |
 | Config schema and every opt-in flag | [CONFIGURATION.md](CONFIGURATION.md) |
-| Reference databases — sources, sizes, refresh cadence | [REFERENCE_DBS.md](REFERENCE_DBS.md) |
+| Reference databases — production paths, refresh cadence | [REFERENCE_DBS.md](REFERENCE_DBS.md) |
 | **Rebuild the classification databases with one snapshot** | [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md) |
 | Per-(sample, virus) CSV schema + multi-run merge | [PER_VIRUS_OUTPUT.md](PER_VIRUS_OUTPUT.md) |
 

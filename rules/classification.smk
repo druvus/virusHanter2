@@ -39,6 +39,9 @@ rule kaiju:
     output:
         kaiju_out=f"{RESULT_FOLDER}/{{sample}}/KAIJU/{{sample}}.kaiju.out",
     threads: THREADS
+    resources:
+        mem_mb=32000,
+        runtime=240,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/kaiju.log"
     conda:
@@ -70,6 +73,9 @@ rule kaiju_to_table:
         # post-rewritten to the ICTV-binomial species name via a
         # parent-rank walk-up. Degrades to a no-op when unset.
         taxdump_nodes=TAXDUMP_NODES,
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/kaiju.yaml"
     script:
@@ -113,6 +119,9 @@ rule wrangle_kraken:
         kraken_csv=f"{RESULT_FOLDER}/{{sample}}/KRAKEN/{{sample}}.kraken.csv",
     params:
         taxdump_nodes=TAXDUMP_NODES,
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/panel.yaml"
     run:

@@ -24,5 +24,33 @@ jobs:
       - name: snakemake --lint (advisory; style warnings only)
         run: snakemake --lint --configfile test/config.test.yaml || true
 
-      - name: snakemake --dry-run
+      - name: snakemake --dry-run (main pipeline)
         run: snakemake -n --configfile test/config.test.yaml
+
+      - name: snakemake --dry-run (refresh workflow)
+        run: |
+          snakemake -n \
+            -s refresh/refresh_virus_parquet.smk \
+            --configfile refresh/config.yaml \
+            2>&1 | grep -v "^Building DAG" | head -40 || true
+        # The refresh workflow downloads from NCBI; the dry-run only
+        # validates that the rule graph resolves without errors.
+        continue-on-error: true
+
+  unit-tests:
+    name: Unit + integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install pandas numpy pyarrow pyfastx pytest
+
+      - name: Run pytest suite
+        run: pytest tests/ -v --tb=short
+        working-directory: ${{ github.workspace }}

@@ -63,6 +63,100 @@ _ALIAS_NAME_CLASSES = (
 )
 
 
+def parse_nodes_dmp(path: str | Path) -> dict[int, tuple[int, str]]:
+    """Parse NCBI ``nodes.dmp`` into ``{tax_id: (parent_tax_id, rank)}``.
+
+    The NCBI ``.dmp`` files use ``\\t|\\t`` as the inter-field delimiter
+    and ``\\t|`` at the end of each row. The first three fields are
+    ``tax_id``, ``parent_tax_id``, ``rank``; everything after column 3
+    is ignored. Returns an empty dict if ``path`` does not exist.
+    """
+    out: dict[int, tuple[int, str]] = {}
+    if not Path(path).exists():
+        return out
+    with open(path) as fh:
+        for line in fh:
+            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
+            parts = stripped.split("\t|\t")
+            if len(parts) < 3:
+                continue
+            try:
+                tid = int(parts[0].strip())
+                parent = int(parts[1].strip())
+            except ValueError:
+                continue
+            out[tid] = (parent, parts[2].strip())
+    return out
+
+
+def find_genus_taxid(
+    tid: int,
+    nodes: dict[int, tuple[int, str]],
+    *,
+    depth_limit: int = 20,
+) -> int:
+    """Walk the parent chain from ``tid`` and return the first ancestor
+    whose rank is ``genus``. Returns ``0`` if no genus ancestor is found
+    within ``depth_limit`` steps or if the chain breaks.
+
+    The depth limit guards against retired-taxid cycles that occasionally
+    appear in NCBI dumps. The chain also stops at the root (parent == tid
+    for the synthetic root node 1).
+    """
+    if tid <= 0 or not nodes:
+        return 0
+    seen: set[int] = set()
+    current = tid
+    for _ in range(depth_limit):
+        if current in seen:
+            return 0
+        seen.add(current)
+        node = nodes.get(current)
+        if node is None:
+            return 0
+        parent, rank = node
+        if rank == "genus":
+            return current
+        if parent == current:
+            return 0
+        current = parent
+    return 0
+
+
+def find_species_taxid(
+    tid: int,
+    nodes: dict[int, tuple[int, str]],
+    *,
+    depth_limit: int = 20,
+) -> int:
+    """Walk the parent chain from ``tid`` and return the first ancestor
+    whose rank is ``species``. Returns ``0`` if no species ancestor is
+    found within ``depth_limit`` steps.
+
+    A taxid that is itself at species rank returns its own value, so
+    the caller can call this unconditionally and use the result as the
+    canonical species taxid.
+    """
+    if tid <= 0 or not nodes:
+        return 0
+    seen: set[int] = set()
+    current = tid
+    for _ in range(depth_limit):
+        if current in seen:
+            return 0
+        seen.add(current)
+        node = nodes.get(current)
+        if node is None:
+            return 0
+        parent, rank = node
+        if rank == "species":
+            return current
+        if parent == current:
+            return 0
+        current = parent
+    return 0
+
+
 def _load_taxdump_for_species_walkup(
     nodes_dmp: str | None, names_dmp: str | None
 ) -> tuple[dict[int, tuple[int, str]], dict[int, str], dict[int, list[str]]] | None:
@@ -82,19 +176,7 @@ def _load_taxdump_for_species_walkup(
         or not Path(names_dmp).is_file()
     ):
         return None
-    node_info: dict[int, tuple[int, str]] = {}
-    with open(nodes_dmp) as fh:
-        for line in fh:
-            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
-            parts = stripped.split("\t|\t")
-            if len(parts) < 3:
-                continue
-            try:
-                tid = int(parts[0].strip())
-                pid = int(parts[1].strip())
-            except ValueError:
-                continue
-            node_info[tid] = (pid, parts[2].strip())
+    node_info = parse_nodes_dmp(nodes_dmp)
     sci_name: dict[int, str] = {}
     alias_name: dict[int, list[str]] = {}
     alias_seen: dict[int, set[str]] = {}
@@ -416,6 +498,38 @@ def parquet_accession_to_taxid(parquet_df: pd.DataFrame) -> dict[str, int]:
         out[first_token] = tid
         out[first_token.split(".")[0]] = tid
     return out
+
+
+def assembler_max_attempts(cfg: dict, is_target_platform: bool) -> int:
+    """Return the total number of assembler attempts to make.
+
+    On the target platform, reads ``ASSEMBLER_RETRIES`` from the config
+    (or the legacy ``MEGAHIT_RETRIES`` key for backward compatibility)
+    and returns that value plus one for the initial attempt.  On all
+    other platforms a single attempt is made.
+
+    Using a generic key means both MEGAHIT and SPAdes share the same
+    retry budget on Apple Silicon, where non-deterministic SIGSEGV or
+    library-size failures can occur.
+    """
+    if not is_target_platform:
+        return 1
+    n = int(cfg.get("ASSEMBLER_RETRIES", cfg.get("MEGAHIT_RETRIES", 4)))
+    return n + 1
+
+
+def write_dummy_contig(path: str) -> None:
+    """Write a minimal placeholder FASTA contig to ``path``.
+
+    Used when an assembler produces no usable output so that downstream
+    rules always receive a syntactically valid FASTA.  The contig
+    carries a synthetic 200 bp sequence and will not match any real
+    database entry.
+    """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(">DUMMY_CONTIG\n")
+        fh.write("TTAACCTTGG" * 20 + "\n")
 
 
 def read_file_as_blob(file_path: str) -> str:

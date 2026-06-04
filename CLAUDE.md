@@ -147,6 +147,14 @@ Apple Silicon caveats:
 When the CheckV DB is stubbed, the smoke degrades automatically to
 `--until blastn mosdepth_kraken_hits kaiju_to_table`.
 
+## Reference databases
+
+For a full account of all nine reference databases (purpose, source
+URL or build command, config key, gotchas, disk/RAM/network
+requirements, and the Kraken2 standard-vs-pluspf / Kaiju
+refseq-vs-viruses decision notes), see
+[`docs/DATABASE_SETUP.md`](docs/DATABASE_SETUP.md).
+
 ## Refresh workflow
 
 `refresh/refresh_virus_parquet.smk` is a standalone Snakemake

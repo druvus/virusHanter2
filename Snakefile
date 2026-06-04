@@ -23,7 +23,7 @@ def _check_db_paths_exist(cfg: dict) -> None:
     drive: without this, the first rule that touches the missing path
     crashes mid-run with a tool-specific error (samtools, blastn,
     etc.) instead of a clear "your database is missing" report. The
-    check is best-effort — it tolerates BWA / BLAST prefix-only paths
+    check is best-effort -- it tolerates BWA / BLAST prefix-only paths
     by checking the parent directory.
     """
     missing: list[str] = []
@@ -76,6 +76,94 @@ def _check_db_paths_exist(cfg: dict) -> None:
 
 
 _check_db_paths_exist(config)
+
+
+def _warn_db_snapshot_mismatch(cfg: dict) -> None:
+    """Emit a warning when reference databases appear to come from different
+    NCBI snapshots.
+
+    Compares build dates where a ``build_stats.json`` sidecar exists next to
+    ``VIRUS_PARQUET``; otherwise falls back to directory / file modification
+    times.  A spread greater than 30 days between any pair triggers the
+    warning.  The check is advisory only -- the workflow is not aborted.
+    """
+    import json
+    import sys
+    import time
+
+    MAX_SPREAD_DAYS = 30
+
+    def _mtime(path_str: str) -> float:
+        """Return the mtime of a path (file or directory) in seconds."""
+        try:
+            return Path(path_str).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    # Collect (label, epoch_seconds) for each DB.
+    timestamps: list[tuple[str, float]] = []
+
+    # VIRUS_PARQUET: prefer build_stats.json build_date_utc over mtime.
+    parquet_path = cfg.get("VIRUS_PARQUET", "")
+    if parquet_path:
+        stats_path = Path(parquet_path).with_name(
+            Path(parquet_path).stem + "_build_stats.json"
+        )
+        ts = 0.0
+        if stats_path.is_file():
+            try:
+                with open(stats_path) as fh:
+                    stats = json.load(fh)
+                # build_date_utc is ISO-8601, e.g. "2026-05-17T14:22:33+00:00"
+                from datetime import datetime, timezone
+                ts = datetime.fromisoformat(
+                    stats["build_date_utc"]
+                ).astimezone(timezone.utc).timestamp()
+            except Exception:
+                ts = _mtime(parquet_path)
+        else:
+            ts = _mtime(parquet_path)
+        if ts:
+            timestamps.append(("VIRUS_PARQUET", ts))
+
+    # KRAKEN_DB, KAIJU_DB, BLASTN_DB: directory / parent-directory mtime.
+    for key in ("KRAKEN_DB", "KAIJU_DB"):
+        path = cfg.get(key, "")
+        if path:
+            ts = _mtime(path)
+            if ts:
+                timestamps.append((key, ts))
+
+    blast_db = cfg.get("BLASTN_DB", "")
+    if blast_db:
+        ts = _mtime(str(Path(blast_db).parent))
+        if ts:
+            timestamps.append(("BLASTN_DB", ts))
+
+    if len(timestamps) < 2:
+        return
+
+    min_ts = min(t for _, t in timestamps)
+    max_ts = max(t for _, t in timestamps)
+    spread_days = (max_ts - min_ts) / 86400.0
+
+    if spread_days > MAX_SPREAD_DAYS:
+        oldest = min(timestamps, key=lambda x: x[1])
+        newest = max(timestamps, key=lambda x: x[1])
+        print(
+            f"WARNING: reference databases may come from different NCBI snapshots "
+            f"(spread {spread_days:.0f} days). "
+            f"Oldest: {oldest[0]} "
+            f"({time.strftime('%Y-%m-%d', time.gmtime(oldest[1]))}), "
+            f"newest: {newest[0]} "
+            f"({time.strftime('%Y-%m-%d', time.gmtime(newest[1]))}). "
+            "Run refresh/refresh_virus_parquet.smk to rebuild all databases "
+            "from the same snapshot.",
+            file=sys.stderr,
+        )
+
+
+_warn_db_snapshot_mismatch(config)
 
 
 # Import pipeline-side helpers. Report rendering and parsing live in the

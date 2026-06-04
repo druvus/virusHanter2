@@ -7,6 +7,7 @@ truth. Runs in the rule's conda env (``envs/blastn.yaml``) so the
 ``blastn`` binary is on PATH.
 """
 
+import logging
 import os
 from pathlib import Path
 import sys
@@ -30,4 +31,7 @@ df.to_csv(snakemake.output.blast, index=False)
 
 temp = Path(snakemake.params.temp_file)
 if temp.exists():
-    os.remove(temp)
+    try:
+        os.remove(temp)
+    except OSError as exc:
+        logging.warning("Could not remove BLASTN temp file %s: %s", temp, exc)

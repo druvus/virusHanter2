@@ -59,6 +59,9 @@ rule bwa_align_to_kraken_hits:
         coverage_rank_filter=COVERAGE_RANK_FILTER,
         coverage_genus_walkup=COVERAGE_GENUS_WALKUP,
     threads: THREADS
+    resources:
+        mem_mb=16000,
+        runtime=120,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_kraken.log"
     conda:
@@ -88,6 +91,9 @@ rule mosdepth_kraken_hits:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/mosdepth.log"
     threads: 4
+    resources:
+        mem_mb=4000,
+        runtime=60,
     conda:
         "../envs/mosdepth.yaml"
     shell:
@@ -181,6 +187,9 @@ rule generate_report:
             if hasattr(input, "genomad_summaries")
             else ""
         ),
+    resources:
+        mem_mb=4000,
+        runtime=30,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/reporthanter.log",
     shell:
@@ -248,6 +257,9 @@ rule per_virus_metrics:
             if hasattr(input, "genomad_summaries")
             else ""
         ),
+    resources:
+        mem_mb=4000,
+        runtime=30,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/per_virus_metrics.log"
     conda:
@@ -281,6 +293,9 @@ rule aggregate_per_virus:
         ),
     output:
         per_virus_csv=f"{RESULT_FOLDER}/per_virus_{Path(config['SAMPLES']).name}.csv",
+    resources:
+        mem_mb=4000,
+        runtime=30,
     log:
         f"{RESULT_FOLDER}/logs/aggregate_per_virus.log"
     conda:
@@ -326,6 +341,9 @@ rule multiqc:
         data=directory(f"{RESULT_FOLDER}/multiqc_data"),
     params:
         results_folder=RESULT_FOLDER,
+    resources:
+        mem_mb=4000,
+        runtime=60,
     log:
         f"{RESULT_FOLDER}/logs/multiqc.log",
     conda:
@@ -355,6 +373,9 @@ rule aggregate_run_information:
     params:
         results_folder=RESULT_FOLDER,
         assemblers=ASSEMBLERS,
+    resources:
+        mem_mb=4000,
+        runtime=30,
     log:
         f"{RESULT_FOLDER}/logs/aggregate_run_information.log",
     conda:

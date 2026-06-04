@@ -80,6 +80,9 @@ rule fastp:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/fastp.log"
     threads: THREADS
+    resources:
+        mem_mb=8000,
+        runtime=120,
     conda:
         "../envs/fastp.yaml"
     shell:
@@ -108,6 +111,9 @@ rule bwa_human:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_human.log"
     threads: THREADS
+    resources:
+        mem_mb=16000,
+        runtime=120,
     conda:
         "../envs/bwa.yaml"
     shell:
@@ -125,7 +131,7 @@ rule bwa_human:
 # reporthanter). The markdup BAM is emitted as well so `remove_host`
 # can read it when `DEDUPLICATE: TRUE` is set in config. With
 # `DEDUPLICATE: FALSE` (the default), `remove_host` ignores this BAM
-# and continues to consume the un-marked bwa_human output — the
+# and continues to consume the un-marked bwa_human output -- the
 # pipeline is then byte-identical to the pre-markdup behaviour.
 #
 # `samtools markdup` requires MC/MS tags added by `fixmate`, which in
@@ -140,6 +146,9 @@ rule markdup_human:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/markdup_human.log"
     threads: THREADS
+    resources:
+        mem_mb=8000,
+        runtime=60,
     conda:
         "../envs/samtools.yaml"
     shell:
@@ -172,6 +181,9 @@ rule remove_host:
         dup_filter="-F 1024" if DEDUPLICATE else "",
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/remove_host.log"
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/samtools.yaml"
     shell:
@@ -189,6 +201,9 @@ rule bam_to_fastq_human:
         r2=f"{RESULT_FOLDER}/{{sample}}/bwa/{{sample}}_human_unmapped_r2.fastq",
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bam_to_fastq_human.log"
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/samtools.yaml"
     shell:
@@ -208,6 +223,9 @@ rule bwa_secondary_host:
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bwa_secondary.log"
     threads: THREADS
+    resources:
+        mem_mb=16000,
+        runtime=120,
     conda:
         "../envs/bwa.yaml"
     shell:
@@ -232,6 +250,9 @@ rule remove_secondary_host:
         is_secondary_host=str(SECONDARY_HOST_OR_NOT),
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/remove_secondary_host.log"
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/samtools.yaml"
     shell:
@@ -280,7 +301,7 @@ rule hostile_human:
         # Default to the viral-mask + phage-mask T2T-CHM13 index.
         # The bare `human-t2t-hla` index would filter reads from
         # endogenous retroviruses, phages and other host-embedded
-        # viral elements as host — exactly the reads a viral
+        # viral elements as host -- exactly the reads a viral
         # metagenomics pipeline must preserve. The masked variant
         # leaves the human genome intact except for those regions
         # that align to a curated viral / phage reference, so the
@@ -355,6 +376,9 @@ rule bam_to_fastq_secondary:
         r2=f"{RESULT_FOLDER}/{{sample}}/bwa/{{sample}}_final_unmapped_r2.fastq",
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/bam_to_fastq_secondary.log"
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/samtools.yaml"
     shell:

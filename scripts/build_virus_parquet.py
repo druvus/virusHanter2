@@ -45,10 +45,22 @@ import argparse
 import gzip
 import json
 import logging
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+
+# When this script is executed directly (`python scripts/build_virus_parquet.py`)
+# the script directory is on sys.path but the project root is not. Insert the
+# project root so that `from scripts.functions import ...` resolves correctly.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.functions import (  # noqa: E402
+    find_genus_taxid,
+    find_species_taxid,
+    parse_nodes_dmp,
+)
 
 # Lazy-import pyfastx inside the FASTA-reading helper so consumers
 # that only call the taxdump parser / walk-up helpers (e.g. the
@@ -206,112 +218,6 @@ def load_taxid_map_subset(path: Path, wanted: set[str]) -> dict[str, int]:
         seen,
     )
     return out
-
-
-def parse_nodes_dmp(path: Path) -> dict[int, tuple[int, str]]:
-    """Parse NCBI ``nodes.dmp`` into ``{tax_id: (parent_tax_id, rank)}``.
-
-    The NCBI ``.dmp`` files use ``\\t|\\t`` as the inter-field
-    delimiter and ``\\t|`` at the end of each row. nodes.dmp's first
-    three fields are ``tax_id``, ``parent_tax_id``, ``rank``; everything
-    after column 3 is ignored. The full file is small (~12 MB
-    uncompressed, ~2.6M nodes) and parses in a few seconds.
-    """
-    out: dict[int, tuple[int, str]] = {}
-    if not Path(path).exists():
-        return out
-    with open(path) as fh:
-        for line in fh:
-            # Strip the trailing "\t|\n" if present and split on "\t|\t".
-            stripped = line.rstrip("\n").rstrip("\t|").rstrip()
-            parts = stripped.split("\t|\t")
-            if len(parts) < 3:
-                continue
-            try:
-                tid = int(parts[0].strip())
-                parent = int(parts[1].strip())
-            except ValueError:
-                continue
-            rank = parts[2].strip()
-            out[tid] = (parent, rank)
-    return out
-
-
-def find_genus_taxid(
-    tid: int,
-    nodes: dict[int, tuple[int, str]],
-    *,
-    depth_limit: int = 20,
-) -> int:
-    """Walk the parent chain from ``tid`` upward and return the first
-    ancestor whose rank is ``genus``. Returns ``0`` if no genus is
-    found within ``depth_limit`` steps or if the chain breaks (a
-    tax_id is missing from the nodes map).
-
-    The depth limit protects against retired-taxid cycles that
-    occasionally show up in NCBI dumps. The chain also stops once
-    it reaches the root (``parent == tid`` for the synthetic root
-    node 1) so the loop is always bounded.
-    """
-    if tid <= 0 or not nodes:
-        return 0
-    seen: set[int] = set()
-    current = tid
-    for _ in range(depth_limit):
-        if current in seen:
-            return 0
-        seen.add(current)
-        node = nodes.get(current)
-        if node is None:
-            return 0
-        parent, rank = node
-        if rank == "genus":
-            return current
-        if parent == current:
-            return 0
-        current = parent
-    return 0
-
-
-def find_species_taxid(
-    tid: int,
-    nodes: dict[int, tuple[int, str]],
-    *,
-    depth_limit: int = 20,
-) -> int:
-    """Walk the parent chain from ``tid`` upward and return the first
-    ancestor whose rank is ``species``. Returns ``0`` if no species is
-    found within ``depth_limit`` steps.
-
-    Mirrors ``find_genus_taxid`` but stops at the species rank. Used by
-    the BLAST canonicaliser to collapse sub-species / strain / type
-    taxids onto their ICTV-binomial species (e.g. ``human
-    gammaherpesvirus 4`` (taxid 10376, rank S1) and ``Human herpesvirus
-    4 type 2`` (taxid 12509, rank S2) both walk up to
-    ``Lymphocryptovirus humangamma4`` (taxid 3050299, rank species).
-
-    A taxid that is itself at species rank returns its own value, so
-    the caller can call this unconditionally and use the result as the
-    canonical species taxid.
-    """
-    if tid <= 0 or not nodes:
-        return 0
-    seen: set[int] = set()
-    current = tid
-    for _ in range(depth_limit):
-        if current in seen:
-            return 0
-        seen.add(current)
-        node = nodes.get(current)
-        if node is None:
-            return 0
-        parent, rank = node
-        if rank == "species":
-            return current
-        if parent == current:
-            return 0
-        current = parent
-    return 0
 
 
 def enrich_with_taxdump(

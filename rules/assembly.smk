@@ -26,12 +26,61 @@ CONTIG_LENGTH = config.get("CONTIG_LENGTH", 500)
 BLASTN_DB = config["BLASTN_DB"]
 CHECKV_DB = config["CHECKV_DB"]
 PILON_MEM = config.get("PILON_MEM", "50G")
-PILON_MEM_MB = int(PILON_MEM.rstrip("Gg")) * 1024
+
+# Validate PILON_MEM: must be a positive integer followed by 'G' or 'g',
+# and must not exceed available system RAM by an obvious margin.
+import re as _re
+import os as _os
+
+_pilon_mem_match = _re.fullmatch(r"(\d+)[Gg]", str(PILON_MEM))
+if not _pilon_mem_match:
+    raise WorkflowError(
+        f"config[PILON_MEM] must be a positive integer followed by 'G' "
+        f"(e.g. '50G'), got {PILON_MEM!r}."
+    )
+_pilon_mem_gb = int(_pilon_mem_match.group(1))
+if _pilon_mem_gb < 1:
+    raise WorkflowError(
+        f"config[PILON_MEM] must be at least '1G', got {PILON_MEM!r}."
+    )
+try:
+    _available_ram_gb = int(
+        _os.sysconf("SC_PAGE_SIZE") * _os.sysconf("SC_PHYS_PAGES") / (1024 ** 3)
+    )
+    if _pilon_mem_gb > _available_ram_gb:
+        import sys as _sys
+        print(
+            f"WARNING: config[PILON_MEM] ({PILON_MEM}) exceeds available "
+            f"system RAM ({_available_ram_gb} GB). Pilon may be killed by the "
+            "OS OOM reaper. Reduce PILON_MEM or run on a larger host.",
+            file=_sys.stderr,
+        )
+except (AttributeError, ValueError):
+    pass  # sysconf not available on this platform; skip the RAM check.
+
+PILON_MEM_MB = _pilon_mem_gb * 1024
 
 # Optional geNomad classifier (off by default; turn on with
 # `GENOMAD: "TRUE"` in config plus a populated `GENOMAD_DB`).
 RUN_GENOMAD = config.get("GENOMAD", "FALSE") == "TRUE"
 GENOMAD_DB = config.get("GENOMAD_DB", "")
+
+# Validate GENOMAD_SPLITS: must be a non-negative integer (0 = mmseqs
+# auto-split; any positive value partitions the mmseqs search to cap
+# peak RAM). Validated here so a bad value raises at parse time rather
+# than inside a running geNomad job.
+_genomad_splits_raw = config.get("GENOMAD_SPLITS", 4)
+try:
+    _GENOMAD_SPLITS = int(_genomad_splits_raw)
+except (TypeError, ValueError):
+    raise WorkflowError(
+        f"config[GENOMAD_SPLITS] must be a non-negative integer (0 = "
+        f"mmseqs auto-split), got {_genomad_splits_raw!r}."
+    )
+if _GENOMAD_SPLITS < 0:
+    raise WorkflowError(
+        f"config[GENOMAD_SPLITS] must be >= 0, got {_GENOMAD_SPLITS}."
+    )
 
 # Optional QUAST assembly assessment (off by default). When TRUE,
 # `rule quast_per_assembler` runs against each (sample, assembler) and
@@ -147,6 +196,9 @@ rule quast_per_assembler:
         report_dir=directory(f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST"),
         report_tsv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/QUAST/report.tsv",
     threads: 2
+    resources:
+        mem_mb=8000,
+        runtime=120,
     log:
         f"{RESULT_FOLDER}/{{sample}}/logs/quast_{{assembler}}.log",
     conda:
@@ -217,6 +269,9 @@ rule wrangle_pilon:
         csv=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/{{sample}}.contigs.csv",
     params:
         min_len=CONTIG_LENGTH,
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/panel.yaml"
     run:
@@ -276,7 +331,17 @@ rule checkv:
         # number of threads (also fails at -t 1) and the hmmer build, and
         # there is no newer CheckV release on bioconda. Production / Phase 6
         # parity runs must use Linux.
+        #
+        # A second macOS issue: external volumes formatted as HFS+ or APFS
+        # write AppleDouble '._*.hmm' metadata files alongside every real
+        # HMM. CheckV mis-reads these as HMMs and fails with "N hmmsearch
+        # tasks failed". They are silently removed here on Darwin before
+        # CheckV runs; on Linux the block is a no-op.
         """
+        if [ "$(uname)" = "Darwin" ]; then
+            find {params.db} -name "._*" -delete 2>/dev/null || true
+        fi
+
         checkv contamination \
             -d {params.db} \
             {input.contigs} \
@@ -286,7 +351,10 @@ rule checkv:
 
         mv {params.folder}/contamination.tsv {output.checkv}
         # Drop CheckV intermediates; keep the contamination TSV only.
-        ls -d -1 {params.folder}/* | grep -v .tsv | xargs rm -rf
+        # Log a warning rather than failing if any file cannot be removed.
+        ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
+            | xargs -r rm -rf \
+            || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
         """
 
 
@@ -308,6 +376,9 @@ rule merge_checkv_blastn:
             if config.get("TAXDUMP_NODES")
             else ""
         ),
+    resources:
+        mem_mb=4000,
+        runtime=30,
     conda:
         "../envs/panel.yaml"
     run:
@@ -385,7 +456,7 @@ rule genomad:
         # samples and still completes in reasonable time. Set to 0
         # in config[GENOMAD_SPLITS] to restore mmseqs' auto-split
         # behaviour on Linux machines with abundant RAM.
-        splits=int(config.get("GENOMAD_SPLITS", 4)),
+        splits=_GENOMAD_SPLITS,
     threads: THREADS
     resources:
         mem_mb=16000,

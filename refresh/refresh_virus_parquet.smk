@@ -582,7 +582,7 @@ rule publish_taxdump_nodes:
     can point at a stable location that survives the temporary
     download workdir. Both files land together because the
     canonicalisation helper in ``scripts/functions.py`` derives the
-    ``names.dmp`` path from ``nodes.dmp``'s parent — they have to
+    ``names.dmp`` path from ``nodes.dmp``'s parent -- they have to
     sit side-by-side or the canonicalisation degrades to a no-op."""
     input:
         nodes=rules.decompress_taxdump.output.nodes,

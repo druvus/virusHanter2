@@ -12,6 +12,7 @@ Lives in ``scripts/`` so the ``conda:`` env declared on the
 rule (``envs/bwa.yaml``) is honoured at execution time.
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,14 +20,12 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.build_virus_parquet import (  # noqa: E402
-    find_genus_taxid,
-    find_species_taxid,
-    parse_nodes_dmp,
-)
 from scripts.functions import (  # noqa: E402
     _format_aliases,
     _load_taxdump_for_species_walkup,
+    find_genus_taxid,
+    find_species_taxid,
+    parse_nodes_dmp,
     parquet_accession_to_taxid,
 )
 
@@ -39,8 +38,13 @@ threads = snakemake.threads
 log_path = snakemake.log[0] if snakemake.log else "/dev/null"
 
 
+# Resolve bash at import time so non-standard installations are handled
+# transparently. Falls back to /bin/bash if bash is not found on PATH.
+_BASH = shutil.which("bash") or "/bin/bash"
+
+
 def _shell(cmd: str) -> None:
-    subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+    subprocess.run(cmd, shell=True, check=True, executable=_BASH)
 
 
 virus_db_df = pd.read_parquet(params.virus_db)
