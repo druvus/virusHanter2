@@ -9,12 +9,63 @@ the report rules invoke either by CLI or by library import.
 """
 
 from pathlib import Path
+import hashlib
 import os
+import pickle
 import re
 import subprocess
+import tempfile
 
 import numpy as np
 import pandas as pd
+
+
+def _taxdump_cache_path(kind: str, *sources: str) -> Path:
+    """Per-user cache path for a parsed taxdump structure.
+
+    The cache key folds in each source path together with its mtime and
+    size, so a refreshed taxdump (new mtime/size) misses the stale cache
+    and is re-parsed automatically. The cache lives under the OS
+    cache/temp dir, never on the (often read-only, often external and
+    slow) reference-database volume.
+    """
+    parts: list[str] = [kind]
+    for source in sources:
+        try:
+            st = os.stat(source)
+            parts.append(f"{os.path.abspath(source)}:{int(st.st_mtime)}:{st.st_size}")
+        except OSError:
+            parts.append(f"{source}:0:0")
+    digest = hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+    base = os.environ.get("XDG_CACHE_HOME") or tempfile.gettempdir()
+    return Path(base) / "virushanter2_taxdump" / f"{kind}_{digest}.pkl"
+
+
+def _cache_load(cache_path: Path):
+    """Return the unpickled cache object, or None on any miss/corruption."""
+    try:
+        with open(cache_path, "rb") as fh:
+            return pickle.load(fh)
+    except (OSError, pickle.UnpicklingError, EOFError, ValueError):
+        return None
+
+
+def _cache_store(cache_path: Path, obj) -> None:
+    """Atomically pickle `obj` to `cache_path`; silent on any failure.
+
+    Writes to a pid-suffixed temp file then `os.replace` so concurrent
+    Snakemake jobs parsing the same taxdump cannot leave a torn cache
+    for a reader (replace is atomic; identical content makes the race
+    benign).
+    """
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}")
+        with open(tmp, "wb") as fh:
+            pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cache_path)
+    except OSError:
+        pass
 
 # ``pyfastx`` is used only by ``fastx_file_to_df`` (called from the
 # wrangle_pilon rule's panel env). Lazy-import inside that function so
@@ -74,6 +125,10 @@ def parse_nodes_dmp(path: str | Path) -> dict[int, tuple[int, str]]:
     out: dict[int, tuple[int, str]] = {}
     if not Path(path).exists():
         return out
+    cache_path = _taxdump_cache_path("nodes", str(path))
+    cached = _cache_load(cache_path)
+    if cached is not None:
+        return cached
     with open(path) as fh:
         for line in fh:
             stripped = line.rstrip("\n").rstrip("\t|").rstrip()
@@ -86,6 +141,7 @@ def parse_nodes_dmp(path: str | Path) -> dict[int, tuple[int, str]]:
             except ValueError:
                 continue
             out[tid] = (parent, parts[2].strip())
+    _cache_store(cache_path, out)
     return out
 
 
@@ -176,6 +232,10 @@ def _load_taxdump_for_species_walkup(
         or not Path(names_dmp).is_file()
     ):
         return None
+    cache_path = _taxdump_cache_path("walkup", str(nodes_dmp), str(names_dmp))
+    cached = _cache_load(cache_path)
+    if cached is not None:
+        return cached
     node_info = parse_nodes_dmp(nodes_dmp)
     sci_name: dict[int, str] = {}
     alias_name: dict[int, list[str]] = {}
@@ -198,7 +258,9 @@ def _load_taxdump_for_species_walkup(
                 if value not in bucket:
                     bucket.add(value)
                     alias_name.setdefault(tid, []).append(value)
-    return node_info, sci_name, alias_name
+    result = (node_info, sci_name, alias_name)
+    _cache_store(cache_path, result)
+    return result
 
 
 def _format_aliases(
@@ -505,8 +567,8 @@ def parquet_accession_to_taxid(parquet_df: pd.DataFrame) -> dict[str, int]:
 # conda envs (which lack pandas/numpy). Re-exported here for driver-env
 # callers and the test-suite that import them from ``scripts.functions``.
 from scripts.assembler_utils import (  # noqa: E402
-    assembler_max_attempts,
-    write_dummy_contig,
+    assembler_max_attempts,  # noqa: F401  - intentional re-export
+    write_dummy_contig,  # noqa: F401  - intentional re-export
 )
 
 

@@ -26,6 +26,7 @@ from scripts.per_virus_metrics import (  # noqa: E402
     parquet_refs_by_taxid,
     parse_fastp_total_reads,
     parse_flagstat,
+    read_virus_parquet_taxids,
 )
 
 
@@ -562,3 +563,66 @@ def test_build_per_virus_rows_zero_total_reads_does_not_divide_by_zero():
     assert row["specific_virus_rpm"] == 0.0
     assert row["all_virus_rpm"] == 0.0
     assert row["human_reads_percent"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# read_virus_parquet_taxids: column projection + fallback
+# ---------------------------------------------------------------------------
+
+
+def _write_parquet(path: Path, frame: pd.DataFrame) -> Path:
+    frame.to_parquet(path)
+    return path
+
+
+def test_read_virus_parquet_taxids_projects_only_needed_columns(tmp_path):
+    # A full-schema parquet; the reader must skip the heavy `sequence`
+    # column and return name + tax_id only.
+    p = _write_parquet(
+        tmp_path / "v.parquet",
+        pd.DataFrame(
+            {
+                "name": ["NC_001 alpha", "NC_002 beta"],
+                "sequence": ["ACGT" * 1000, "TTTT" * 1000],
+                "tax_id": [100001, 100002],
+                "rank": ["species", "species"],
+                "genus_taxid": [1, 2],
+            }
+        ),
+    )
+    out = read_virus_parquet_taxids(p)
+    assert list(out.columns) == ["name", "tax_id"]
+    assert "sequence" not in out.columns
+    assert out["tax_id"].tolist() == [100001, 100002]
+
+
+def test_read_virus_parquet_taxids_feeds_parquet_refs_by_taxid(tmp_path):
+    # The projected frame must still drive the downstream bucketer that
+    # only reads name + tax_id, proving the projection is sufficient.
+    p = _write_parquet(
+        tmp_path / "v.parquet",
+        pd.DataFrame(
+            {
+                "name": ["NC_001.1 alpha", "NC_009.2 beta"],
+                "sequence": ["ACGT", "TTTT"],
+                "tax_id": [100001, 100002],
+            }
+        ),
+    )
+    buckets = parquet_refs_by_taxid(read_virus_parquet_taxids(p))
+    assert buckets[100001][0]["chrom"] == "NC_001.1"
+    assert buckets[100001][0]["base_accession"] == "NC_001"
+
+
+def test_read_virus_parquet_taxids_falls_back_when_column_absent(tmp_path):
+    # An older parquet build without `tax_id`: pyarrow raises
+    # ArrowInvalid (a ValueError subclass) for the missing projected
+    # field, and the reader must fall back to a full read instead of
+    # propagating the error.
+    p = _write_parquet(
+        tmp_path / "old.parquet",
+        pd.DataFrame({"name": ["NC_001 alpha"], "sequence": ["ACGT"]}),
+    )
+    out = read_virus_parquet_taxids(p)
+    assert "name" in out.columns  # did not raise; fell back to full read
+    assert "sequence" in out.columns
