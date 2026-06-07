@@ -75,7 +75,37 @@ def _check_db_paths_exist(cfg: dict) -> None:
         )
 
 
-_check_db_paths_exist(config)
+def _is_non_executing_invocation() -> bool:
+    """True when snakemake will only build the DAG, not run any rule.
+
+    Dry-runs (``-n`` / ``--dry-run`` / ``--dryrun``) and lint
+    (``--lint``) parse the workflow without reading a single input file,
+    so the reference databases need not be present on disk. The CI smoke
+    job runs ``snakemake -n`` without materialising the test databases;
+    gating the existence check on this keeps that dry-run green while a
+    real run against an unmounted volume still fails fast. Detected from
+    ``sys.argv`` because this runs at Snakefile parse time, before
+    snakemake exposes a resolved settings object.
+    """
+    import sys
+
+    for arg in sys.argv:
+        if arg in ("-n", "--dry-run", "--dryrun", "--lint"):
+            return True
+        # Bundled short flags carry the dry-run 'n', e.g. "-np" / "-pn".
+        # 'n' is unique to dry-run among snakemake's single-letter flags,
+        # so this does not weaken the check on a real run.
+        if len(arg) >= 2 and arg[0] == "-" and arg[1] != "-" and "n" in arg[1:]:
+            return True
+    return False
+
+
+# Skip the on-disk database check when snakemake is only building the
+# DAG (dry-run / lint): those modes never touch a database, and CI runs
+# the dry-run without the test fixtures present. A real run still gets
+# the fail-fast guard against an unmounted reference volume.
+if not _is_non_executing_invocation():
+    _check_db_paths_exist(config)
 
 
 def _warn_db_snapshot_mismatch(cfg: dict) -> None:
