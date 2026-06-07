@@ -147,6 +147,24 @@ def parquet_refs_by_taxid(parquet_df: pd.DataFrame) -> dict[int, list[dict]]:
     return out
 
 
+def read_virus_parquet_taxids(path) -> pd.DataFrame:
+    """Read only the `name` and `tax_id` columns from VIRUS_PARQUET.
+
+    Those are the sole columns consumed downstream (by
+    `parquet_refs_by_taxid`). The parquet's `sequence` column holds whole
+    viral genomes and is the bulk of the file (hundreds of MB);
+    projecting the two needed columns lets pyarrow skip `sequence` on
+    disk and turns a multi-second read into milliseconds. Falls back to a
+    full read if an older parquet build lacks a projected column
+    (pyarrow raises `ArrowInvalid`, a `ValueError` subclass, for an
+    unknown projected field).
+    """
+    try:
+        return pd.read_parquet(path, columns=["name", "tax_id"])
+    except (ValueError, KeyError):
+        return pd.read_parquet(path)
+
+
 def mosdepth_summary_table(summary_text: str) -> dict[str, dict[str, float]]:
     """Parse `mosdepth.summary.txt` (TSV with a header) into
     `{chrom: {length, bases, mean}}`. The trailing `total` and
@@ -610,7 +628,7 @@ def main() -> None:
         else pd.DataFrame()
     )
 
-    parquet_df = pd.read_parquet(args.virus_parquet)
+    parquet_df = read_virus_parquet_taxids(args.virus_parquet)
 
     summary = mosdepth_summary_table(args.mosdepth_summary.read_text())
     thresholds = mosdepth_thresholds_table(args.mosdepth_thresholds)

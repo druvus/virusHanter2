@@ -408,8 +408,19 @@ rule merge_checkv_blastn:
         # degrades to a no-op when TAXDUMP_NODES is empty or the
         # dmp files are unreadable; `match_name_raw` is always added
         # so the audit trail survives.
+        # canonicalise_blast_match_name only consumes the parquet's
+        # `name` and `tax_id` columns (via parquet_accession_to_taxid).
+        # Project those two so pyarrow skips the multi-hundred-MB
+        # `sequence` column on disk; this rule runs once per
+        # (sample, assembler), so the saving multiplies. Fall back to a
+        # full read if an older parquet build lacks a projected column.
         try:
-            parquet_df = pd.read_parquet(params.virus_parquet)
+            try:
+                parquet_df = pd.read_parquet(
+                    params.virus_parquet, columns=["name", "tax_id"]
+                )
+            except (ValueError, KeyError):
+                parquet_df = pd.read_parquet(params.virus_parquet)
         except Exception as e:
             print(f"[merge_checkv_blastn] could not read parquet: {e}; skipping canonicalisation")
             parquet_df = pd.DataFrame()
