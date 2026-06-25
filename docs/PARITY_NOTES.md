@@ -312,11 +312,13 @@ runs, set `COVERAGE_SOURCES: ["KRAKEN"]` and
 the new column but every row's `sources` value is `kraken`, so
 the column can be dropped before diffing.
 
-## 2026-05-21: Multi-assembler mode (MEGAHIT + metaSPAdes)
+## 2026-05-21: Multi-assembler mode (MEGAHIT + metaSPAdes + rnaviralSPAdes)
 
-`ASSEMBLERS: ["MEGAHIT", "SPAdes"]` is now the default. Every
-contig-producing rule (Pilon, BLASTN, CheckV, geNomad and QUAST when
-enabled) runs once per (sample, assembler) and lands under
+`ASSEMBLERS: ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]` is now the
+default (all three; the deprecated `SPAdes` alias is rejected at
+workflow load). Every contig-producing rule (Pilon, BLASTN, CheckV,
+geNomad and QUAST when enabled) runs once per (sample, assembler) and
+lands under
 `{sample}/{assembler}/...`. The report's "Classification of Contigs"
 tab carries an `assembler` column and the BLAST headline bar chart
 splits per assembler. The per-virus CSV gains trailing
@@ -329,7 +331,7 @@ This is a **deliberate parity break**:
   contigs across all active assemblers, so the value will differ
   from a MEGAHIT-only baseline.
 - `top_contigs_blastn` selects from the union; the top five may
-  include rows from either assembler.
+  include rows from any of the active assemblers.
 - The HTML report's contig table now has an extra leading column.
 
 To recover byte-identical parity with the original `virusHanter`,

@@ -7,7 +7,7 @@
 A Snakemake pipeline for viral metagenomics analysis. Paired-end
 Illumina reads (typically Twist Comprehensive Virus Research Panel
 enrichment) are quality-trimmed, host-cleaned, classified
-(Kraken2 + Kaiju), assembled in parallel by MEGAHIT + metaSPAdes,
+(Kraken2 + Kaiju), assembled in parallel by MEGAHIT, metaSPAdes and rnaviralSPAdes,
 polished with Pilon, annotated (BLASTN, CheckV, optionally
 geNomad), and rendered into an interactive HTML per sample plus
 tabular per-batch and per-(sample, virus) summaries.
@@ -76,7 +76,7 @@ PILON_MEM:      "16G"
 MEGAHIT_MEM_FRACTION: 0.8
 
 # Multi-assembler mode (default — set to ["MEGAHIT"] for parity).
-ASSEMBLERS: ["MEGAHIT", "metaSPAdes"]
+ASSEMBLERS: ["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]
 
 # Multi-source coverage selection (default).
 COVERAGE_SOURCES: ["KRAKEN", "KAIJU", "BLAST"]

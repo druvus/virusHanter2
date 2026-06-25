@@ -33,7 +33,7 @@ rendered in the per-sample HTML report from the mosdepth
 | `note` | Empty for clean runs; carries `"MEGAHIT assembly failed; dummy contig only"` when every BLASTN contig for the sample is the `DUMMY_CONTIG` fallback so silent assembly failures are visible. |
 | `specific_virus_rpm` | `virus_reads_kraken2 / total_reads * 1e6`. |
 | `all_virus_rpm` | `all_viral_kraken_reads / total_reads * 1e6`. `all_viral_kraken_reads` is the Kraken Domain "Viruses" row's `count_clades` (already accounts for descendant clades). |
-| `completeness_5x` | Fraction of reference bases with mosdepth depth >= 5 across all references for this taxid. 0-1. |
+| `Completeness (% >5X)` | Percent of reference bases with mosdepth depth >= 5 across all references for this taxid. 0-100. |
 | `bases_above_5x` | Raw base count >= 5x across all references for this taxid. |
 | `mean_coverage` | Weighted mean depth: `sum(bases_aligned) / sum(reference_length)` across references. |
 
@@ -49,7 +49,7 @@ existing consumers because they read the CSV by column name.
 | `genomad_max_virus_score` | When `GENOMAD: "TRUE"`: highest geNomad `virus_score` among the attributed contigs. |
 
 A virus that is in the Kraken top-N but has no aligned reads ends up
-with `bases_above_5x = 0`, `completeness_5x = 0`, `mean_coverage = 0`.
+with `bases_above_5x = 0`, `Completeness (% >5X) = 0`, `mean_coverage = 0`.
 The "Viruses" Domain row itself is one of the top-N candidates and
 has no reference in the BWA index; its row carries the Kraken stats
 but blank coverage.
@@ -61,7 +61,7 @@ per-virus row aggregates across them:
 
 - `bases_above_5x` = sum across references.
 - `mean_coverage` = `sum(bases_aligned) / sum(reference_length)`.
-- `completeness_5x` = `bases_above_5x / sum(reference_length)`.
+- `Completeness (% >5X)` = `100 * bases_above_5x / sum(reference_length)`.
 
 ## Per-batch concatenation
 

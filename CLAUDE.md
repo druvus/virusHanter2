@@ -20,7 +20,8 @@ report and `run_information_<batch>.csv` schema of the original
 rules/
   pre_processing.smk    fastp, bwa host removal, markdup, optional dedup
   classification.smk    Kaiju, Kraken2, top-N viral hit selection
-  assembly.smk          MEGAHIT + metaSPAdes (per-assembler wildcard),
+  assembly.smk          MEGAHIT + metaSPAdes + rnaviralSPAdes
+                        (per-assembler wildcard),
                         Pilon, BLASTN, CheckV, optional QUAST and
                         geNomad
   post_processing.smk   mosdepth, generate_report, MultiQC, per-virus
@@ -62,7 +63,7 @@ on first use.
 | `QUAST` | `"FALSE"` | `quast_per_assembler` runs against each (sample, assembler) pair and the per-assembler reports are fed to MultiQC. Bioconda has no `osx-arm64` build of QUAST; on Apple Silicon either keep this off or set `CONDA_SUBDIR=osx-64`. |
 | `GENOMAD` | `"FALSE"` | `genomad` end-to-end runs alongside CheckV per (sample, assembler); geNomad's per-contig scores are appended as additive columns in `per_virus_metrics.csv`. Requires `GENOMAD_DB`. |
 | `GENOMAD_SPLITS` | `4` | `genomad --splits N` value. Higher reduces peak `mmseqs prefilter` memory at the cost of run time; default 4 keeps the peak under ~6 GB on the DRRKK samples. Set `0` to restore mmseqs' auto-split. |
-| `ASSEMBLERS` | `["MEGAHIT", "SPAdes"]` | List of de novo assemblers run per sample. Choices: `MEGAHIT`, `SPAdes` (metaSPAdes `--meta`), `rnaviralSPAdes` (SPAdes `--rnaviral`, tuned for RNA virus libraries). Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/...`. Defaults to MEGAHIT + metaSPAdes, which intentionally breaks byte-identical parity with the original `virusHanter` (see `docs/PARITY_NOTES.md`). Set `["MEGAHIT"]` to recover parity. |
+| `ASSEMBLERS` | `["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]` | List of de novo assemblers run per sample. Choices: `MEGAHIT`, `metaSPAdes` (SPAdes `--meta`), `rnaviralSPAdes` (SPAdes `--rnaviral`, tuned for RNA virus libraries). Each entry drives an independent Pilon / BLASTN / CheckV (and optional geNomad / QUAST) chain under `{sample}/{assembler}/...`. Defaults to all three (MEGAHIT + metaSPAdes + rnaviralSPAdes), which intentionally breaks byte-identical parity with the original `virusHanter` (see `docs/PARITY_NOTES.md`); the contigs of all three fold into `number_of_contigs` and `top_contigs_blastn`. Set `["MEGAHIT"]` to recover parity. The deprecated alias `SPAdes` is rejected at workflow load; use `metaSPAdes`. |
 | `HOST_REMOVAL` | `"bwa"` | Host-removal backend. `bwa` runs `bwa mem -k 26` against `HUMAN_INDEX` and is the parity default. `hostile` (Bede et al.) runs minimap2 against a bundled T2T-CHM13 + alt + decoy reference and catches telomeric, centromeric and segmental-duplication host reads that GRCh38-based BWA misses. `HOSTILE_INDEX` optionally points at a pre-downloaded T2T-CHM13 bundle. |
 | `COVERAGE_SOURCES` | `["KRAKEN", "KAIJU", "BLAST"]` | Classifiers whose viral hits contribute taxids to the BWA reference set used by mosdepth coverage. The union of the top-N from each enabled source drives reference selection; an `unmapped_taxids.tsv` sidecar lists classified taxids missing from `VIRUS_PARQUET`. Set `["KRAKEN"]` to recover the pre-multi-source behaviour. |
 | `COVERAGE_TOP_N` | `20` | Per-classifier cap on the number of viral hits whose taxids enter the BWA reference set. Applied independently to each entry in `COVERAGE_SOURCES`. |
