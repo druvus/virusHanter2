@@ -197,6 +197,14 @@ def test_cache_path_changes_when_size_changes(cache_env):
     assert before != after
 
 
+def test_cache_dir_is_user_namespaced(cache_env):
+    # On a shared node, the cache subdir must be per-user so two users
+    # cannot collide on (or be unable to overwrite) the same files.
+    src = _write(cache_env / "n.dmp", NODES)
+    path = F._taxdump_cache_path("nodes", str(src))
+    assert path.parent.name == f"virushanter2_taxdump_{F._cache_user()}"
+
+
 def test_cache_load_missing_returns_none(tmp_path):
     assert F._cache_load(tmp_path / "nope.pkl") is None
 

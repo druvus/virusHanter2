@@ -12,8 +12,7 @@ Lives in ``scripts/`` so the ``conda:`` env declared on the
 rule (``envs/bwa.yaml``) is honoured at execution time.
 """
 
-import shutil
-import subprocess
+import shlex
 import sys
 from pathlib import Path
 
@@ -28,6 +27,7 @@ from scripts.functions import (  # noqa: E402
     parse_nodes_dmp,
     parquet_accession_to_taxid,
 )
+from scripts.shell_utils import resolve_bash, run_piped  # noqa: E402
 
 snakemake = snakemake  # type: ignore[name-defined]
 
@@ -40,11 +40,14 @@ log_path = snakemake.log[0] if snakemake.log else "/dev/null"
 
 # Resolve bash at import time so non-standard installations are handled
 # transparently. Falls back to /bin/bash if bash is not found on PATH.
-_BASH = shutil.which("bash") or "/bin/bash"
+_BASH = resolve_bash()
 
 
 def _shell(cmd: str) -> None:
-    subprocess.run(cmd, shell=True, check=True, executable=_BASH)
+    # Run under `set -o pipefail` so a mid-pipe failure (e.g. bwa mem
+    # aborting while samtools sort still exits 0) is caught instead of
+    # silently producing a truncated BAM and spuriously low coverage.
+    run_piped(cmd, bash=_BASH)
 
 
 virus_db_df = pd.read_parquet(params.virus_db)
@@ -216,10 +219,20 @@ if Path(output.virus_fasta).stat().st_size == 0:
 
 index_prefix = params.index_prefix
 Path(index_prefix).parent.mkdir(parents=True, exist_ok=True)
-_shell(f"bwa index -p {index_prefix} {output.virus_fasta} > {log_path} 2>&1")
+# Shell-quote every interpolated path so a RESULTS_FOLDER / reference path
+# with a space (common on macOS external volumes) does not split into
+# multiple shell arguments. The cleanup glob keeps its trailing `*`
+# outside the quotes so it still expands.
+_q_index = shlex.quote(str(index_prefix))
+_q_fasta = shlex.quote(str(output.virus_fasta))
+_q_log = shlex.quote(str(log_path))
+_q_r1 = shlex.quote(str(input_.r1))
+_q_r2 = shlex.quote(str(input_.r2))
+_q_bam = shlex.quote(str(output.bam))
+_shell(f"bwa index -p {_q_index} {_q_fasta} > {_q_log} 2>&1")
 _shell(
-    f"bwa mem -t {threads} {index_prefix} {input_.r1} {input_.r2} "
-    f"| samtools sort -o {output.bam} - >> {log_path} 2>&1"
+    f"bwa mem -t {threads} {_q_index} {_q_r1} {_q_r2} "
+    f"| samtools sort -o {_q_bam} - >> {_q_log} 2>&1"
 )
-_shell(f"samtools index {output.bam}")
-_shell(f"rm -rf {index_prefix}*")
+_shell(f"samtools index {_q_bam}")
+_shell(f"rm -rf {_q_index}*")

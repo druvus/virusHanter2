@@ -8,6 +8,7 @@ per-assembler DAG keeps a uniform shape.
 """
 
 import platform
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -44,7 +45,16 @@ def _shell_tolerate(cmd: str) -> bool:
     )
 
 
-_shell(f"rm -rf {params.out_dir}")
+# Shell-quote every interpolated path: a RESULTS_FOLDER on a macOS
+# external volume (e.g. "/Volumes/My Passport/...") contains spaces that
+# would otherwise split into multiple shell arguments.
+_q_out_dir = shlex.quote(str(params.out_dir))
+_q_r1 = shlex.quote(str(input_.r1))
+_q_r2 = shlex.quote(str(input_.r2))
+_q_sample = shlex.quote(str(sample))
+_q_log = shlex.quote(str(log_path))
+
+_shell(f"rm -rf {_q_out_dir}")
 
 mem_fraction = float(config.get("MEGAHIT_MEM_FRACTION", 0.5))
 is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
@@ -63,17 +73,17 @@ max_attempts = assembler_max_attempts(config, is_apple_silicon)
 
 success = False
 for attempt in range(1, max_attempts + 1):
-    _shell(f"rm -rf {params.out_dir}")
+    _shell(f"rm -rf {_q_out_dir}")
     try:
         _shell(
             "megahit "
-            f"-1 {input_.r1} -2 {input_.r2} "
-            f"-o {params.out_dir} "
-            f"--out-prefix {sample} "
+            f"-1 {_q_r1} -2 {_q_r2} "
+            f"-o {_q_out_dir} "
+            f"--out-prefix {_q_sample} "
             f"-t {mh_threads} "
             f"-m {mem_fraction} "
             f"{no_hw_accel}{kmin_flag}{kmax_flag}"
-            f"2> {log_path}"
+            f"2> {_q_log}"
         )
         if Path(output.contigs).exists() and Path(output.contigs).stat().st_size > 0:
             success = True
@@ -84,10 +94,28 @@ for attempt in range(1, max_attempts + 1):
 if not success:
     write_dummy_contig(output.contigs)
 
-# Drop MEGAHIT intermediates; keep the contigs FASTA only.
-_shell_tolerate(
-    f"ls -d -1 {params.out_dir}/* 2>/dev/null | grep -v .fa | xargs rm -rf"
-)
+# Drop MEGAHIT intermediates; keep the contigs FASTA(s) only. Done in
+# Python rather than `ls | grep -v .fa | xargs rm -rf`: the old pipe used
+# an unescaped, unanchored `.fa` pattern and an `xargs` without `-r`, so
+# an empty pipe could run `rm -rf` with no operand on some platforms.
+out_dir = Path(params.out_dir)
+if out_dir.is_dir():
+    for entry in out_dir.iterdir():
+        if entry.suffix == ".fa":
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
 
-if Path(output.contigs).read_text() == "":
+# Treat a missing, zero-byte or whitespace-only contigs file as a failed
+# assembly. Reading only the first chunk avoids loading a large FASTA
+# just to test emptiness.
+contigs_path = Path(output.contigs)
+_empty = (
+    not contigs_path.exists()
+    or contigs_path.stat().st_size == 0
+    or contigs_path.open().read(64).strip() == ""
+)
+if _empty:
     write_dummy_contig(output.contigs)

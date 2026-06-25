@@ -10,6 +10,7 @@ all attempts fail so the per-assembler DAG keeps a uniform shape.
 """
 
 import platform
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -50,18 +51,27 @@ candidates = (
     else ("contigs.fasta",)
 )
 
+# Shell-quote every interpolated path: a RESULTS_FOLDER on a macOS
+# external volume (e.g. "/Volumes/My Passport/...") contains spaces that
+# would otherwise split into multiple shell arguments.
+_q_out_dir = shlex.quote(str(params.out_dir))
+_q_r1 = shlex.quote(str(input_.r1))
+_q_r2 = shlex.quote(str(input_.r2))
+_q_contigs = shlex.quote(str(output.contigs))
+_q_log = shlex.quote(str(log_path))
+
 success = False
 for attempt in range(1, max_attempts + 1):
-    _shell(f"rm -rf {params.out_dir}", check=False)
-    _shell(f"mkdir -p {params.out_dir}")
+    _shell(f"rm -rf {_q_out_dir}", check=False)
+    _shell(f"mkdir -p {_q_out_dir}")
 
     try:
         _shell(
             f"spades.py --{mode} "
-            f"-1 {input_.r1} -2 {input_.r2} "
-            f"-o {params.out_dir} "
+            f"-1 {_q_r1} -2 {_q_r2} "
+            f"-o {_q_out_dir} "
             f"-t {threads} -m {mem_gb} --only-assembler "
-            f"> {log_path} 2>&1"
+            f"> {_q_log} 2>&1"
         )
     except subprocess.CalledProcessError:
         # SPAdes refuses libraries below its internal minimum and exits
@@ -72,7 +82,7 @@ for attempt in range(1, max_attempts + 1):
     for candidate in candidates:
         src = Path(params.out_dir) / candidate
         if src.exists() and src.stat().st_size > 0:
-            _shell(f"mv {src} {output.contigs}")
+            _shell(f"mv {shlex.quote(str(src))} {_q_contigs}")
             success = True
             break
 
@@ -82,9 +92,18 @@ for attempt in range(1, max_attempts + 1):
 if not success:
     write_dummy_contig(output.contigs)
 
-# Strip SPAdes intermediates; keep the contigs FASTA only.
-_shell(
-    f"ls -d -1 {params.out_dir}/* 2>/dev/null "
-    f"| grep -v .contigs.fa | xargs rm -rf",
-    check=False,
-)
+# Strip SPAdes intermediates; keep the contigs FASTA(s) only. Done in
+# Python rather than `ls | grep -v .contigs.fa | xargs rm -rf`: the old
+# pipe used an unescaped, unanchored pattern and an `xargs` without `-r`,
+# so an empty pipe could run `rm -rf` with no operand on some platforms.
+# The contigs were renamed to `{sample}.contigs.fa` (suffix `.fa`) above;
+# every other SPAdes output (`*.fasta`, `*.gfa`, K-mer dirs) is dropped.
+out_dir = Path(params.out_dir)
+if out_dir.is_dir():
+    for entry in out_dir.iterdir():
+        if entry.suffix == ".fa":
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)

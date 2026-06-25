@@ -320,7 +320,15 @@ rule multiqc:
         # in the workflow, so depending on it pulls in all per-sample
         # reports and stats files transitively.
         run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
-        markdup=expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES),
+        # markdup stats only exist for the bwa backend; depending on them
+        # under hostile would force the entire redundant bwa chain.
+        # MultiQC scans RESULT_FOLDER regardless, so it still picks the
+        # stats up when bwa wrote them.
+        markdup=(
+            expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES)
+            if HOST_REMOVAL == "bwa"
+            else []
+        ),
         mosdepth=expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
         # Optional: QUAST reports when the assembler-QC step is enabled.
         # MultiQC scans the results folder regardless, but depending on

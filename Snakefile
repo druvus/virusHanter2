@@ -89,14 +89,23 @@ def _is_non_executing_invocation() -> bool:
     """
     import sys
 
+    # Snakemake's no-argument short flags that can be bundled with the
+    # dry-run 'n' (printshellcmds, reason, forceall, keep-going, quiet,
+    # touch). A real-run bundle that carries a value -- e.g. "-sSnakefile"
+    # whose value happens to contain an 'n' -- must NOT be mistaken for a
+    # dry-run, or the database existence guard would be skipped on a real
+    # run against an unmounted volume.
+    _BOOL_SHORT_FLAGS = set("nprFkqt")
+
     for arg in sys.argv:
         if arg in ("-n", "--dry-run", "--dryrun", "--lint"):
             return True
-        # Bundled short flags carry the dry-run 'n', e.g. "-np" / "-pn".
-        # 'n' is unique to dry-run among snakemake's single-letter flags,
-        # so this does not weaken the check on a real run.
-        if len(arg) >= 2 and arg[0] == "-" and arg[1] != "-" and "n" in arg[1:]:
-            return True
+        # Treat a single-dash token as a dry-run bundle only when every
+        # character is a known boolean short flag and 'n' is among them.
+        if len(arg) >= 2 and arg[0] == "-" and arg[1] != "-":
+            body = arg[1:]
+            if "n" in body and set(body) <= _BOOL_SHORT_FLAGS:
+                return True
     return False
 
 
@@ -347,7 +356,14 @@ rule all:
         # across samples by the aggregate_per_virus rule.
         f"{RESULT_FOLDER}/per_virus_{Path(SAMPLES_FOLDER).name}.csv",
         # Per-sample additive QC outputs (do not feed any other rule).
-        expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES),
+        # markdup stats exist only for the bwa backend; the hostile
+        # backend has no bwa human BAM to mark duplicates on, so demanding
+        # them there would force the entire redundant bwa chain to run.
+        (
+            expand(f"{RESULT_FOLDER}/{{sample}}/logs/human_markdup_stats.txt", sample=SAMPLES)
+            if HOST_REMOVAL == "bwa"
+            else []
+        ),
         expand(f"{RESULT_FOLDER}/{{sample}}/MOSDEPTH/{{sample}}.mosdepth.summary.txt", sample=SAMPLES),
         # Run-level QC, gated by MULTIQC config flag (default TRUE).
         [f"{RESULT_FOLDER}/multiqc_report.html"] if RUN_MULTIQC else [],

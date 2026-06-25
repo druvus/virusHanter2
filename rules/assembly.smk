@@ -384,7 +384,10 @@ rule merge_checkv_blastn:
     run:
         import pandas as pd
 
-        from scripts.functions import canonicalise_blast_match_name
+        from scripts.functions import (
+            canonicalise_blast_match_name,
+            dummy_contig_sentinel,
+        )
 
         blastn_df = pd.read_csv(input.blastn)
         checkv_df = (
@@ -395,6 +398,23 @@ rule merge_checkv_blastn:
         # Inner join on `name` matches the original virusHanter behaviour:
         # contigs without a CheckV entry are dropped from the merged table.
         merged = pd.merge(blastn_df, checkv_df, on="name", how="inner")
+        # CheckV runs on the full pilon contig set, which is a superset of
+        # the BLAST contigs, so every BLAST hit should have a CheckV row.
+        # If BLAST produced hits but the merge is empty, CheckV emitted no
+        # usable rows -- e.g. the documented macOS "hmmsearch tasks failed"
+        # / AppleDouble "._*.hmm" mode that leaves an empty contamination
+        # TSV. Silently dropping every hit would read downstream as a clean
+        # negative, so fail loudly instead.
+        if not blastn_df.empty and merged.empty:
+            raise ValueError(
+                f"CheckV produced no rows matching the {len(blastn_df)} BLAST "
+                f"contig(s) for {wildcards.sample}/{wildcards.assembler}; the "
+                f"merged table would be empty. CheckV likely failed -- see "
+                f"logs/checkv_{wildcards.assembler}.log (on macOS check for the "
+                f"'hmmsearch tasks failed' / AppleDouble '._*.hmm' issue). "
+                f"Refusing to write an empty merged CSV that reads as a clean "
+                f"negative."
+            )
         # `assembler` is added by wrangle_pilon and flows through BLASTN;
         # belt-and-braces in case the CSV was rewritten without it.
         if "assembler" not in merged.columns:
@@ -431,6 +451,12 @@ rule merge_checkv_blastn:
             params.names_dmp or None,
         )
 
+        # When the assembler produced only the DUMMY_CONTIG sentinel the
+        # inner join above is empty; carry the dummy name through so
+        # per_virus_metrics can flag the silent failure instead of it
+        # looking like a real negative.
+        merged = dummy_contig_sentinel(merged, checkv_df, wildcards.assembler)
+
         merged.to_csv(output.merged_csv, index=False)
 
 
@@ -438,8 +464,9 @@ rule merge_checkv_blastn:
 #
 # Off by default. Turn on with `GENOMAD: "TRUE"` and a populated
 # `GENOMAD_DB` in config. One geNomad run per (sample, assembler);
-# the per-assembler summary TSV is the headline output:
-# `<sample>/<assembler>/GENOMAD/<sample>_summary/<sample>_virus_summary.tsv`.
+# the per-assembler summary TSV is the headline output (geNomad names
+# its outputs after the input FASTA stem <sample>_improved_contigs.fasta):
+# `<sample>/<assembler>/GENOMAD/<sample>_improved_contigs_summary/<sample>_improved_contigs_virus_summary.tsv`.
 rule genomad:
     input:
         contigs=rules.pilon.output.improved_contigs,

@@ -366,6 +366,55 @@ def test_build_per_virus_rows_flags_dummy_contig_in_note():
     assert (df["note"] == "MEGAHIT assembly failed; dummy contig only").all()
 
 
+def test_dummy_sentinel_round_trips_to_assembly_failure_note(tmp_path):
+    """End-to-end producer -> CSV -> consumer check.
+
+    `dummy_contig_sentinel` (the merge_checkv_blastn producer) must emit
+    a row that, once written to the merged CSV and read back the way
+    per_virus_metrics.main does, drives `build_per_virus_rows` to flag
+    the assembly failure. This guards the NaN-filled sentinel schema
+    against breaking attribution downstream.
+    """
+    from scripts.functions import dummy_contig_sentinel
+
+    merged_cols = ["name", "assembler", "match_name", "accession", "tax_id"]
+    merged = pd.DataFrame(columns=merged_cols)  # empty inner join
+    checkv = pd.DataFrame({"name": ["DUMMY_CONTIG_pilon"], "viral_genes": [0]})
+
+    merged = dummy_contig_sentinel(merged, checkv, "MEGAHIT")
+    csv_path = tmp_path / "merged.csv"
+    merged.to_csv(csv_path, index=False)
+
+    # Read back exactly as per_virus_metrics.main does.
+    blastn_df = pd.read_csv(csv_path)
+
+    kraken = _kraken_df(
+        [
+            (10.0, 100, 100, "D", 10239, "Viruses", "Viruses"),
+            (5.0, 50, 50, "S", 42, "Phage A", "Viruses"),
+        ]
+    )
+    df = build_per_virus_rows(
+        run_name="x",
+        sample_name="s",
+        kraken_df=kraken,
+        kaiju_df=pd.DataFrame(),
+        blastn_df=blastn_df,
+        parquet_df=pd.DataFrame(
+            {"name": ["NC_001 a"], "sequence": ["A"], "tax_id": [42]}
+        ),
+        summary={},
+        thresholds={},
+        total_reads=1000,
+        human_reads=10,
+        top_n=10,
+    )
+    assert not df.empty
+    assert (df["note"] == "MEGAHIT assembly failed; dummy contig only").all()
+    # The dummy must not be attributed as a real contig to any virus.
+    assert (df["contigs"] == 0).all()
+
+
 def test_build_per_virus_rows_dedupes_by_virus_name_keeping_max_contigs():
     """Kraken's S / S1 / S2 sub-rank chain often produces multiple
     rows that all canonicalise to the same virus name. The output
