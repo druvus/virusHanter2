@@ -384,12 +384,19 @@ def aggregate_sample_info(
     genomad_totals: list[int] = []
     genomad_maxes: list[float] = []
     for asm in asm_list:
+        # geNomad names its outputs after the input FASTA stem
+        # (<sample>_improved_contigs.fasta), so the rule writes
+        # <asm>/GENOMAD/<sample>_improved_contigs_summary/<sample>_improved_contigs_virus_summary.tsv
+        # (matching rules/assembly.smk:480 and the per_virus_metrics /
+        # generate_report consumers in post_processing.smk). The earlier
+        # <sample>_summary/<sample>_virus_summary.tsv form never resolved,
+        # leaving these columns silently blank on GENOMAD: "TRUE" runs.
         genomad_path = (
             sample_folder
             / asm
             / "GENOMAD"
-            / f"{sample_name}_summary"
-            / f"{sample_name}_virus_summary.tsv"
+            / f"{sample_name}_improved_contigs_summary"
+            / f"{sample_name}_improved_contigs_virus_summary.tsv"
         )
         if genomad_path.exists() and genomad_path.stat().st_size > 0:
             try:

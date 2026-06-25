@@ -464,8 +464,9 @@ rule merge_checkv_blastn:
 #
 # Off by default. Turn on with `GENOMAD: "TRUE"` and a populated
 # `GENOMAD_DB` in config. One geNomad run per (sample, assembler);
-# the per-assembler summary TSV is the headline output:
-# `<sample>/<assembler>/GENOMAD/<sample>_summary/<sample>_virus_summary.tsv`.
+# the per-assembler summary TSV is the headline output (geNomad names
+# its outputs after the input FASTA stem <sample>_improved_contigs.fasta):
+# `<sample>/<assembler>/GENOMAD/<sample>_improved_contigs_summary/<sample>_improved_contigs_virus_summary.tsv`.
 rule genomad:
     input:
         contigs=rules.pilon.output.improved_contigs,

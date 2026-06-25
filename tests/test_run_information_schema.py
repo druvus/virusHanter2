@@ -110,3 +110,24 @@ def test_run_information_trailing_columns_follow_locked_prefix(tmp_path):
     assert cols[: len(PARITY_LOCKED_COLUMNS)] == PARITY_LOCKED_COLUMNS
     assert "duplicate_pairs" in cols[len(PARITY_LOCKED_COLUMNS) :]
     assert "host_removal_tool" in cols[len(PARITY_LOCKED_COLUMNS) :]
+
+
+def test_genomad_columns_populate_from_improved_contigs_path(tmp_path):
+    # geNomad names its outputs after the input FASTA stem
+    # (<sample>_improved_contigs.fasta), so the rule writes
+    # <asm>/GENOMAD/<sample>_improved_contigs_summary/<sample>_improved_contigs_virus_summary.tsv.
+    # aggregate_sample_info must stat that exact path; the earlier
+    # <sample>_summary/<sample>_virus_summary.tsv form never resolved,
+    # leaving the geNomad columns silently blank on GENOMAD: "TRUE" runs.
+    sample = _build_sample(tmp_path)
+    sample_name = sample.name
+    gdir = sample / "MEGAHIT" / "GENOMAD" / f"{sample_name}_improved_contigs_summary"
+    gdir.mkdir(parents=True)
+    (gdir / f"{sample_name}_improved_contigs_virus_summary.tsv").write_text(
+        "seq_name\tvirus_score\nk57_1\t0.95\nk57_2\t0.80\n"
+    )
+
+    df = aggregate_sample_info(sample, assemblers=["MEGAHIT"])
+
+    assert df["genomad_viral_contigs"].iloc[0] == 2
+    assert df["genomad_max_virus_score"].iloc[0] == 0.95
