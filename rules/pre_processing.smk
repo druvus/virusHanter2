@@ -296,14 +296,6 @@ rule bwa_secondary_host:
 rule remove_secondary_host:
     input:
         mapped_bam=rules.bwa_secondary_host.output.mapped_bam,
-        # Only consumed by the disabled-secondary `cp` fallback below,
-        # which is dead in the DAG (this rule is only built when a
-        # secondary host is configured). Depend on the bwa human-unmapped
-        # BAM only when the primary backend is bwa, so a `hostile` primary
-        # does not pull in (and run) the entire redundant bwa chain.
-        unmapped_bam_human=(
-            rules.remove_host.output.unmapped_bam if HOST_REMOVAL == "bwa" else []
-        ),
     output:
         unmapped_bam=f"{RESULT_FOLDER}/{{sample}}/bwa/{{sample}}_secondary_unmapped.bam",
         flagstat=f"{RESULT_FOLDER}/{{sample}}/logs/secondary_contamination_flagstat.txt",
@@ -322,9 +314,16 @@ rule remove_secondary_host:
             samtools flagstat {input.mapped_bam} > {output.flagstat}
             samtools view -b -f 12 {input.mapped_bam} > {output.unmapped_bam} 2>> {log}
         else
-            # Plain copy rather than a symlink so the output is portable
-            # across machines and archivable in place.
-            cp {input.unmapped_bam_human} {output.unmapped_bam}
+            # No secondary host configured. generate_report still depends
+            # on this rule's flagstat, so the rule runs, but the
+            # secondary-unmapped BAM is not consumed downstream: the
+            # secondary FASTQ conversion only enters the DAG when a
+            # secondary host is set. Emit empty placeholders for both
+            # outputs. The earlier `cp {{input.unmapped_bam_human}} ...`
+            # crashed under HOST_REMOVAL: "hostile" -- where no bwa
+            # human-unmapped BAM exists, so the source operand was empty --
+            # with "cp: missing destination file operand".
+            : > {output.unmapped_bam}
             : > {output.flagstat}
         fi
         """
