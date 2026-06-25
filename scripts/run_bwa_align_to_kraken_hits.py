@@ -13,8 +13,6 @@ rule (``envs/bwa.yaml``) is honoured at execution time.
 """
 
 import shlex
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +27,7 @@ from scripts.functions import (  # noqa: E402
     parse_nodes_dmp,
     parquet_accession_to_taxid,
 )
+from scripts.shell_utils import resolve_bash, run_piped  # noqa: E402
 
 snakemake = snakemake  # type: ignore[name-defined]
 
@@ -41,11 +40,14 @@ log_path = snakemake.log[0] if snakemake.log else "/dev/null"
 
 # Resolve bash at import time so non-standard installations are handled
 # transparently. Falls back to /bin/bash if bash is not found on PATH.
-_BASH = shutil.which("bash") or "/bin/bash"
+_BASH = resolve_bash()
 
 
 def _shell(cmd: str) -> None:
-    subprocess.run(cmd, shell=True, check=True, executable=_BASH)
+    # Run under `set -o pipefail` so a mid-pipe failure (e.g. bwa mem
+    # aborting while samtools sort still exits 0) is caught instead of
+    # silently producing a truncated BAM and spuriously low coverage.
+    run_piped(cmd, bash=_BASH)
 
 
 virus_db_df = pd.read_parquet(params.virus_db)
