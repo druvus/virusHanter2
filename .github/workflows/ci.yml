@@ -19,7 +19,9 @@ jobs:
       - name: Install Snakemake and reportHanter
         run: |
           pip install "snakemake==9.23.*" pandas pyfastx numpy
-          pip install git+https://github.com/druvus/reporthanter.git@main
+          # Pin to the released tag (matches envs/reporthanter.yaml) so CI
+          # and production materialise the same reportHanter code.
+          pip install git+https://github.com/druvus/reporthanter.git@v0.9.0
 
       - name: snakemake --lint (advisory; style warnings only)
         run: snakemake --lint --configfile test/config.test.yaml || true
