@@ -11,10 +11,15 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import pandas as pd  # noqa: E402
 
 from scripts.functions import (  # noqa: E402
     common_suffix,
+    dummy_contig_sentinel,
     paired_reads,
     wrangle_kraken,
 )
@@ -41,6 +46,18 @@ def test_paired_reads_finds_uncompressed(tmp_path):
         "x_R2.fastq",
     ])
     assert paired_reads(str(tmp_path)) == ["x_R"]
+
+
+def test_paired_reads_raises_on_odd_file_count(tmp_path):
+    # A missing mate (odd number of FASTQ files) must fail with a clear
+    # message naming the problem, not an opaque IndexError from samples[i+1].
+    _touch_all(tmp_path, [
+        "a_R1.fastq.gz",
+        "a_R2.fastq.gz",
+        "b_R1.fastq.gz",  # b_R2 missing
+    ])
+    with pytest.raises(ValueError, match="odd number"):
+        paired_reads(str(tmp_path))
 
 
 def test_common_suffix_handles_gz(tmp_path):
@@ -152,3 +169,64 @@ def test_wrangle_kraken_pluspf_cellular_r1_does_not_shadow_d(tmp_path):
     assert by_name["Escherichia coli"] == "Bacteria"
     assert by_name["Viruses"] == "Viruses"
     assert by_name["Human alphaherpesvirus 3"] == "Viruses"
+
+
+# --- dummy_contig_sentinel: surface a silent total assembly failure ---
+# When an assembler produces no usable contigs it writes a DUMMY_CONTIG
+# sentinel. CheckV still reports it but BLASTN drops it (no DB hit), so
+# the BLAST/CheckV inner join is empty and per_virus_metrics cannot tell
+# a silent failure apart from a real negative. dummy_contig_sentinel
+# carries one dummy-named row through so the downstream flag can fire.
+
+_MERGED_COLS = ["name", "assembler", "match_name", "tax_id", "viral_genes"]
+
+
+def test_dummy_contig_sentinel_emits_row_on_failed_assembly():
+    merged = pd.DataFrame(columns=_MERGED_COLS)  # empty inner join
+    checkv = pd.DataFrame({"name": ["DUMMY_CONTIG_pilon"], "viral_genes": [0]})
+
+    out = dummy_contig_sentinel(merged, checkv, "MEGAHIT")
+
+    assert len(out) == 1
+    assert out["name"].iloc[0] == "DUMMY_CONTIG_pilon"
+    assert out["assembler"].iloc[0] == "MEGAHIT"
+    # Schema is preserved so concatenation downstream stays clean.
+    assert list(out.columns) == _MERGED_COLS
+
+
+def test_dummy_contig_sentinel_noop_when_merge_has_real_hits():
+    merged = pd.DataFrame(
+        {
+            "name": ["NODE_1"],
+            "assembler": ["MEGAHIT"],
+            "match_name": ["Some virus"],
+            "tax_id": [12345],
+            "viral_genes": [3],
+        }
+    )
+    checkv = pd.DataFrame({"name": ["NODE_1"], "viral_genes": [3]})
+
+    out = dummy_contig_sentinel(merged, checkv, "MEGAHIT")
+
+    pd.testing.assert_frame_equal(out, merged)
+
+
+def test_dummy_contig_sentinel_noop_when_checkv_has_real_contigs():
+    # A genuine negative: real contigs assembled, none viral, so the
+    # join is empty but CheckV lists real (non-dummy) contig names. This
+    # must NOT be flagged as an assembly failure.
+    merged = pd.DataFrame(columns=_MERGED_COLS)
+    checkv = pd.DataFrame({"name": ["NODE_1", "NODE_2"], "viral_genes": [0, 0]})
+
+    out = dummy_contig_sentinel(merged, checkv, "metaSPAdes")
+
+    assert out.empty
+
+
+def test_dummy_contig_sentinel_noop_when_checkv_empty():
+    merged = pd.DataFrame(columns=_MERGED_COLS)
+    checkv = pd.DataFrame(columns=["name", "viral_genes"])
+
+    out = dummy_contig_sentinel(merged, checkv, "MEGAHIT")
+
+    assert out.empty

@@ -48,7 +48,7 @@ snakemake    --sdm conda --cores N --configfile config/config.local.yaml
 snakemake --unlock                                                # after Ctrl-C
 ```
 
-The driver env only needs Snakemake (`snakemake-minimal=9.14.*` to
+The driver env only needs Snakemake (`snakemake-minimal=9.23.*` to
 stay pickle-compatible with the `reporthanter` rule env). Every
 per-rule tool gets its own conda env from `envs/*.yaml`, materialised
 on first use.

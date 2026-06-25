@@ -43,7 +43,7 @@ while the matching parquet and Kaiju FMI both included it).
 - A LaCie-class external drive (or any volume with ~40 GB free
   for downloads and ~5 GB for the published outputs).
 - The `virushanter` conda env active (or any env with
-  `snakemake-minimal=9.14.*` plus `pandas`, `pyarrow`, `pyfastx`,
+  `snakemake-minimal=9.23.*` plus `pandas`, `pyarrow`, `pyfastx`,
   `requests`-stack — the refresh workflow materialises its own
   per-rule conda env from `envs/refresh.yaml` regardless).
 - ~1 hour of wall time on a residential connection: the longest

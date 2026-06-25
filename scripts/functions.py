@@ -9,6 +9,7 @@ the report rules invoke either by CLI or by library import.
 """
 
 from pathlib import Path
+import getpass
 import hashlib
 import os
 import pickle
@@ -18,6 +19,18 @@ import tempfile
 
 import numpy as np
 import pandas as pd
+
+
+def _cache_user() -> str:
+    """Best-effort current-user tag for namespacing the cache dir.
+
+    Falls back to the numeric uid (or "user") if the username cannot be
+    resolved, so the call never raises in an odd execution environment.
+    """
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - any resolution failure -> fallback
+        return str(os.getuid()) if hasattr(os, "getuid") else "user"
 
 
 def _taxdump_cache_path(kind: str, *sources: str) -> Path:
@@ -33,20 +46,34 @@ def _taxdump_cache_path(kind: str, *sources: str) -> Path:
     for source in sources:
         try:
             st = os.stat(source)
-            parts.append(f"{os.path.abspath(source)}:{int(st.st_mtime)}:{st.st_size}")
+            # Full-resolution mtime (nanoseconds): an in-place refresh to
+            # an identical byte size within the same wall-clock second
+            # still invalidates the cache, which truncated whole-second
+            # mtimes would miss.
+            parts.append(f"{os.path.abspath(source)}:{st.st_mtime_ns}:{st.st_size}")
         except OSError:
             parts.append(f"{source}:0:0")
     digest = hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
     base = os.environ.get("XDG_CACHE_HOME") or tempfile.gettempdir()
-    return Path(base) / "virushanter2_taxdump" / f"{kind}_{digest}.pkl"
+    # Namespace the cache dir by user so that on a shared HPC node one
+    # user cannot collide with (or be unable to overwrite) another's
+    # cache files, and an unpickled object always came from this user.
+    return Path(base) / f"virushanter2_taxdump_{_cache_user()}" / f"{kind}_{digest}.pkl"
 
 
 def _cache_load(cache_path: Path):
-    """Return the unpickled cache object, or None on any miss/corruption."""
+    """Return the unpickled cache object, or None on any miss/corruption.
+
+    Catches broadly on purpose: a truncated, version-mismatched or
+    otherwise unreadable pickle can raise more than the usual
+    Unpickling/EOF/Value errors (e.g. AttributeError, ModuleNotFoundError,
+    MemoryError). Any failure simply falls back to a fresh parse rather
+    than aborting the rule.
+    """
     try:
         with open(cache_path, "rb") as fh:
             return pickle.load(fh)
-    except (OSError, pickle.UnpicklingError, EOFError, ValueError):
+    except Exception:  # noqa: BLE001 - any cache failure -> re-parse
         return None
 
 
@@ -383,6 +410,40 @@ def canonicalise_taxon_names(
     return out
 
 
+def dummy_contig_sentinel(
+    merged: pd.DataFrame,
+    checkv_df: pd.DataFrame,
+    assembler: str,
+) -> pd.DataFrame:
+    """Carry a DUMMY_CONTIG sentinel row through a failed assembly.
+
+    When an assembler produces no usable contigs it writes a single
+    ``DUMMY_CONTIG`` sequence (Pilon polishes it to
+    ``DUMMY_CONTIG_pilon``). CheckV still reports that contig, but
+    BLASTN drops it because it matches no database entry, so the
+    BLAST/CheckV inner join in ``merge_checkv_blastn`` is empty. An
+    empty merge is indistinguishable from a genuine negative (real
+    contigs assembled, none viral), so ``per_virus_metrics`` cannot
+    flag the silent failure.
+
+    When the merge is empty *and* every contig CheckV reported is a
+    DUMMY_CONTIG sentinel, return a one-row frame carrying that name
+    (with the merge's own columns preserved so downstream
+    concatenation stays clean) so the empty-assembly note can fire.
+    Otherwise return ``merged`` unchanged.
+    """
+    if not merged.empty or checkv_df.empty or "name" not in checkv_df.columns:
+        return merged
+    names = checkv_df["name"].dropna().astype(str)
+    if len(names) == 0 or not names.str.startswith("DUMMY_CONTIG").all():
+        return merged
+    row = {col: pd.NA for col in merged.columns}
+    row["name"] = names.iloc[0]
+    if "assembler" in row:
+        row["assembler"] = assembler
+    return pd.DataFrame([row], columns=list(merged.columns))
+
+
 def canonicalise_blast_match_name(
     blastn_df: pd.DataFrame,
     parquet_df: pd.DataFrame,
@@ -623,6 +684,14 @@ def paired_reads(folder: str) -> list:
         for x in Path(folder).iterdir()
         if re.search(r"\.(fq|fastq|fa|fasta|fna)(\.gz)?$", x.name)
     )
+
+    if len(samples) % 2 != 0:
+        raise ValueError(
+            f"Found an odd number of sequencing files ({len(samples)}) in "
+            f"{folder}; paired-end discovery needs an R1/R2 mate for every "
+            f"sample. Check for a missing mate or a stray FASTQ. Files: "
+            f"{samples}"
+        )
 
     prefixes = []
     for i in range(0, len(samples), 2):

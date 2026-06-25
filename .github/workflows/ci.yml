@@ -18,7 +18,7 @@ jobs:
 
       - name: Install Snakemake and reportHanter
         run: |
-          pip install "snakemake>=9" pandas pyfastx numpy
+          pip install "snakemake==9.23.*" pandas pyfastx numpy
           pip install git+https://github.com/druvus/reporthanter.git@main
 
       - name: snakemake --lint (advisory; style warnings only)

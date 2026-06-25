@@ -31,7 +31,7 @@ report can still surface `EBV`, `Epstein-Barr virus`,
 #    before the first run; every per-rule tool gets a fresh conda
 #    env materialised under .snakemake/conda/ on first use.
 conda create -n virushanter -c conda-forge -c bioconda \
-    'snakemake-minimal=9.14.*' mamba
+    'snakemake-minimal=9.23.*' mamba
 conda activate virushanter
 
 # 2. configure
@@ -76,7 +76,7 @@ PILON_MEM:      "16G"
 MEGAHIT_MEM_FRACTION: 0.8
 
 # Multi-assembler mode (default — set to ["MEGAHIT"] for parity).
-ASSEMBLERS: ["MEGAHIT", "SPAdes"]
+ASSEMBLERS: ["MEGAHIT", "metaSPAdes"]
 
 # Multi-source coverage selection (default).
 COVERAGE_SOURCES: ["KRAKEN", "KAIJU", "BLAST"]

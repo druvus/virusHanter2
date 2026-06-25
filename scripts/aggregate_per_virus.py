@@ -38,7 +38,7 @@ PER_VIRUS_COLUMNS = [
     "note",
     "specific_virus_rpm",
     "all_virus_rpm",
-    "completeness_5x",
+    "Completeness (% >5X)",
     "bases_above_5x",
     "mean_coverage",
 ]
@@ -61,8 +61,12 @@ def main() -> None:
     if frames:
         df = pd.concat(frames, ignore_index=True)
         # Reindex to the canonical column order so the batch file has a
-        # stable schema regardless of which sample wrote first.
-        df = df.reindex(columns=PER_VIRUS_COLUMNS)
+        # stable schema regardless of which sample wrote first. Any
+        # additive trailing columns the per-sample step emits (per-
+        # assembler `*_contigs`, geNomad scores) are preserved after the
+        # fixed schema in their existing order, rather than dropped.
+        extra = [c for c in df.columns if c not in PER_VIRUS_COLUMNS]
+        df = df.reindex(columns=PER_VIRUS_COLUMNS + extra)
     else:
         df = pd.DataFrame(columns=PER_VIRUS_COLUMNS)
     args.out.parent.mkdir(parents=True, exist_ok=True)
