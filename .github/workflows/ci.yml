@@ -18,7 +18,11 @@ jobs:
 
       - name: Install Snakemake and reportHanter
         run: |
-          pip install "snakemake==9.23.*" pandas pyfastx numpy
+          # The run:-block rules (wrangle_kraken, wrangle_pilon,
+          # merge_checkv_blastn) execute in this driver env (Snakemake
+          # ignores conda: on run: blocks), so it needs pandas/numpy/
+          # pyfastx AND pyarrow (merge_checkv_blastn reads the parquet).
+          pip install "snakemake==9.23.*" pandas numpy pyfastx pyarrow
           # Pin to the released tag (matches envs/reporthanter.yaml) so CI
           # and production materialise the same reportHanter code.
           pip install git+https://github.com/druvus/reporthanter.git@v0.9.0
