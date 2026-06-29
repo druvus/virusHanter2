@@ -486,9 +486,9 @@ resulting `genomad_db/` directory.
 **Gotchas.**
 - `genomad end-to-end` calls mmseqs2, which performs many small random
   reads against ~228 k marker profiles. Running with the database on an
-  external USB drive is impractical (a 9-hour stall was observed on
-  this workstation with the geNomad database on a LaCie external drive).
-  Stage the database on local SSD or a fast network filesystem before
+  external USB drive is impractical (a 9-hour stall was observed with
+  the geNomad database on an external USB drive). Stage the database on
+  local SSD or a fast network filesystem before
   enabling `GENOMAD: "TRUE"`.
 - The default `GENOMAD_SPLITS: 4` partitions the mmseqs search to keep
   peak memory under ~6 GB. Raise this value on memory-constrained hosts

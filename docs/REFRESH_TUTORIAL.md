@@ -40,8 +40,9 @@ while the matching parquet and Kaiju FMI both included it).
 
 ## What you need before you start
 
-- A LaCie-class external drive (or any volume with ~40 GB free
-  for downloads and ~5 GB for the published outputs).
+- A volume with ~40 GB free for downloads and ~5 GB for the
+  published outputs. Paths below use `$VH2_ROOT` as the deployment
+  base (see [DEPLOY_LINUX.md](DEPLOY_LINUX.md)); substitute your own.
 - The `virushanter` conda env active (or any env with
   `snakemake-minimal=9.23.*` plus `pandas`, `pyarrow`, `pyfastx`,
   `requests`-stack — the refresh workflow materialises its own
@@ -70,9 +71,9 @@ snakemake -s refresh/refresh_virus_parquet.smk \
 `refresh/config.local.yaml` carries four key paths:
 
 ```yaml
-OUTPUT_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
-DOWNLOAD_DIR:   "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
-KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+OUTPUT_PARQUET: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+DOWNLOAD_DIR:   "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
+KRAKEN_DB_FOR_COMPARE: "$VH2_ROOT/ref_dbs/KRAKEN_DB/k2_viral_20260226"
 # Source URLs default to the canonical NCBI FTP paths; override
 # only when you want a pinned snapshot.
 ```
@@ -87,8 +88,8 @@ sequence is:
    (`viral.*.1.genomic.fna.gz`), the matching protein FASTA
    (`viral.*.protein.faa.gz`), the nucleotide and protein
    accession2taxid mappings, and the NCBI taxdump tarball. The
-   rules use `curl` (not `wget`) so the `utime()` LaCie filesystem
-   quirk does not abort the chain.
+   rules use `curl` (not `wget`) so the `utime()` quirk seen on some
+   external / network filesystems does not abort the chain.
 2. **Decompress** the parts into single concatenated FASTAs and
    extract `nodes.dmp` + `names.dmp` from `taxdump.tar.gz`.
 3. **Build the parquet** via
@@ -145,7 +146,7 @@ sequence is:
 After a successful refresh the parquet's directory looks like:
 
 ```
-/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
+$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
 ├── all_viruses.parquet               (~250 MB)
 ├── all_viruses_build_stats.json
 ├── all_viruses_vs_kraken2.tsv        (one row per tax_id; ~1 MB)
@@ -189,11 +190,11 @@ After a successful refresh the parquet's directory looks like:
 Update your run config (e.g. `config/config.local.yaml`):
 
 ```yaml
-VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
-TAXDUMP_NODES: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
-KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
-KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
-BLASTN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
+VIRUS_PARQUET: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+TAXDUMP_NODES: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
+KAIJU_DB:      "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
+KRAKEN_DB:     "$VH2_ROOT/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+BLASTN_DB:     "$VH2_ROOT/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
 ```
 
 Force `bwa_align_to_kraken_hits` and `kaiju` to re-run on the
@@ -222,13 +223,13 @@ your local install uses a different alias mix:
 
 ```yaml
 BLAST_NAMES: ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
-BLAST_PUBLISH_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
+BLAST_PUBLISH_DIR: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
 ```
 
 After the refresh, point the main pipeline at the new alias:
 
 ```yaml
-BLASTN_DB: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral/viral_rna_mito"
+BLASTN_DB: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral/viral_rna_mito"
 ```
 
 ## Troubleshooting

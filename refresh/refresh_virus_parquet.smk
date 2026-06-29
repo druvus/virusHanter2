@@ -281,7 +281,8 @@ rule download_accession2taxid:
     Snakemake's set -e aborts the shell block before md5sum runs,
     and Snakemake's failure handler removes the (otherwise valid)
     downloaded file. curl writes directly to the target path
-    without calling utime(), so the chain is robust on LaCie.
+    without calling utime(), so the chain is robust on external and
+    network-mounted volumes.
 
     Integrity check still runs after download; if the .md5
     verification fails we surface that as the failure rather than
@@ -313,7 +314,7 @@ rule download_prot_accession2taxid:
     rewrite step that prepares the RefSeq viral protein FASTA for
     Kaiju's BWT builder.
 
-    Uses curl for the same LaCie-on-macOS reason as
+    Uses curl for the same external-volume-on-macOS reason as
     ``download_accession2taxid``.
     """
     output:
