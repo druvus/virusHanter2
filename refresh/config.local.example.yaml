@@ -3,12 +3,15 @@
 # Ready-to-edit config for the database refresh workflow
 # (refresh/refresh_virus_parquet.smk), which builds VIRUS_PARQUET, the
 # Kaiju FMI, the Kraken2 viral DB, the BLAST viral alias and the taxdump
-# from one coordinated NCBI viral RefSeq snapshot. Copy and edit:
+# from one coordinated NCBI viral RefSeq snapshot. All paths use /data as
+# the base; relocate to your chosen base in one step:
 #
-#   cp refresh/config.local.example.yaml refresh/config.local.yaml
-#   $EDITOR refresh/config.local.yaml
+#   export VH2_ROOT=/your/base
+#   sed "s|/data|$VH2_ROOT|g" refresh/config.local.example.yaml > refresh/config.local.yaml
+#   $EDITOR refresh/config.local.yaml     # review
 #
-# See docs/REFRESH_TUTORIAL.md and step 2 of docs/DEPLOY_LINUX.md.
+# (Keeping VH2_ROOT=/data is a no-op.) See docs/REFRESH_TUTORIAL.md and
+# step 2 of docs/DEPLOY_LINUX.md.
 
 # Output parquet. Every other database is published next to it:
 #   <parent>/nodes.dmp, <parent>/names.dmp
