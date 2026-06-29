@@ -392,9 +392,11 @@ regressions:
 
 ## Sign-off
 
-Document each parity run below as it is performed. Keep the refactored
-pipeline in place as the default once at least two independent batches
-have been validated.
+Follow [`PARITY_SIGNOFF.md`](PARITY_SIGNOFF.md) for the runnable
+procedure (parity-recovery config, run steps, the `parity_diff.py`
+comparison recipe and the pass condition). Document each parity run
+below as it is performed. Keep the refactored pipeline in place as the
+default once at least two independent batches have been validated.
 
 | Date | Sample / batch | Operator | Result | Notes |
 |------|----------------|----------|--------|-------|
