@@ -2,7 +2,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - blast>=2.14
+  - blast>=2.16.0
   - python>=3.11
   - pandas>=2.0
   - numpy>=1.24

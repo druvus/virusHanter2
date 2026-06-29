@@ -49,10 +49,18 @@ snakemake    --sdm conda --cores N --configfile config/config.local.yaml
 snakemake --unlock                                                # after Ctrl-C
 ```
 
-The driver env only needs Snakemake (`snakemake-minimal=9.23.*` to
-stay pickle-compatible with the `reporthanter` rule env). Every
-per-rule tool gets its own conda env from `envs/*.yaml`, materialised
-on first use.
+The driver env needs `snakemake-minimal=9.23.*` (pinned to stay
+pickle-compatible with the `reporthanter` rule env) **plus**
+`pandas`, `numpy`, `pyfastx` and `pyarrow`. The Python deps are
+required because three rules use `run:` blocks (`wrangle_kraken`,
+`wrangle_pilon`, `merge_checkv_blastn`): Snakemake ignores the
+`conda:` directive on `run:` blocks, so those bodies execute in the
+driver process, not in `envs/panel.yaml`. They call pandas/numpy
+(canonicalisation), pyfastx (`fastx_file_to_df`) and pyarrow
+(`pd.read_parquet`). Every external tool gets its own conda env from
+`envs/*.yaml`, materialised on first use. (Converting the three
+`run:` blocks to `script:` so the panel env applies and the driver
+can stay Snakemake-only is a tracked follow-up.)
 
 ## Optional stages — config-flag gated
 

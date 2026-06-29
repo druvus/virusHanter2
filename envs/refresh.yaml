@@ -21,5 +21,5 @@ dependencies:
   # rule drives to fetch NCBI's pre-built viral BLAST tarballs
   # (ref_viruses_rep_genomes, mito_rna_db, taxdb) into the
   # snapshot directory alongside the parquet and the Kaiju FMI.
-  - blast>=2.15
+  - blast>=2.16.0
   - perl-archive-tar
