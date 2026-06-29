@@ -9,17 +9,17 @@
 
 # Where the final parquet should land. The path the main pipeline
 # config points at via VIRUS_PARQUET.
-OUTPUT_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+OUTPUT_PARQUET: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
 
 # Working directory for the FASTA, accession2taxid and taxdump
 # downloads. Pick a location with at least 40 GB free.
-DOWNLOAD_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
+DOWNLOAD_DIR: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
 
 # Production Kraken2 viral DB. The `compare_with_kraken2` rule
 # calls `kraken2-inspect` against this DB to compute overlap with
 # the parquet's taxid universe and writes the result to a sidecar
 # TSV next to the parquet.
-KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+KRAKEN_DB_FOR_COMPARE: "/data/ref_dbs/KRAKEN_DB/k2_viral_20260226"
 
 # BLAST DB tarballs the `refresh_blast` rule fetches via
 # `update_blastdb.pl`. The defaults match the production
@@ -28,7 +28,7 @@ KRAKEN_DB_FOR_COMPARE: "/Volumes/LaCie/REGIONEN/ref_dbs/KRAKEN_DB/k2_viral_20260
 # `BLAST_PUBLISH_DIR` defaults to a sibling directory next to the
 # parquet so all four classifier DBs share a coordinated snapshot.
 # BLAST_NAMES:       ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
-# BLAST_PUBLISH_DIR: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
+# BLAST_PUBLISH_DIR: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
 
 # Source URLs. Override if you want a different snapshot. The
 # defaults pull the full multi-part NCBI viral RefSeq release

@@ -147,7 +147,7 @@ Apple Silicon caveats:
   metaSPAdes-derived proteomes (3× larger than MEGAHIT). The
   default `GENOMAD_SPLITS: 4` partitions the search; raise it on
   smaller hosts.
-- `wget` on a LaCie-mounted external volume emits a non-fatal
+- `wget` on some external / network-mounted volumes emits a non-fatal
   `utime()` warning that some builds expose as a non-zero exit
   code. The refresh workflow uses `curl` for the large downloads
   to avoid the issue; mirror that pattern in any new download

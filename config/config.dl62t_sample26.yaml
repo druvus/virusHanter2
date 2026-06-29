@@ -11,13 +11,13 @@ RESULTS_FOLDER: "/Users/andreassjodin/Code/regionen/scratch/results"
 THREADS: 4
 CLEAN: "FALSE"
 
-HUMAN_INDEX:   "/Volumes/LaCie/REGIONEN/ref_dbs/BWA_GENCODE_GRCH38/human_gencode"
-KAIJU_DB:      "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
-KRAKEN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kraken2_refseq_viral"
-BLASTN_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
-CHECKV_DB:     "/Volumes/LaCie/REGIONEN/ref_dbs/CHECKV_DB/checkv-db-v1.5"
-VIRUS_PARQUET: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
-TAXDUMP_NODES: "/Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
+HUMAN_INDEX:   "/data/ref_dbs/BWA_GENCODE_GRCH38/human_gencode"
+KAIJU_DB:      "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
+KRAKEN_DB:     "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kraken2_refseq_viral"
+BLASTN_DB:     "/data/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
+CHECKV_DB:     "/data/ref_dbs/CHECKV_DB/checkv-db-v1.5"
+VIRUS_PARQUET: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
+TAXDUMP_NODES: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
 
 CONTIG_LENGTH: 500
 NUMBER_OF_PLOTS: 10
@@ -29,4 +29,4 @@ MULTIQC:     "TRUE"
 DEDUPLICATE: "FALSE"
 QUAST:       "TRUE"
 GENOMAD:     "TRUE"
-GENOMAD_DB:  "/Volumes/LaCie/REGIONEN/ref_dbs/GENOMAD_DB/genomad_db"
+GENOMAD_DB:  "/data/ref_dbs/GENOMAD_DB/genomad_db"
