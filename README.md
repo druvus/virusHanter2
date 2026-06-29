@@ -105,6 +105,7 @@ Long-form documentation lives under [`docs/`](docs/README.md):
 | Topic | File |
 |---|---|
 | **Documentation index** | [docs/README.md](docs/README.md) |
+| **Fresh Linux server: install, build DBs, run, merge** | [docs/DEPLOY_LINUX.md](docs/DEPLOY_LINUX.md) |
 | **Database setup — all 9 databases, sources, build commands** | [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md) |
 | Pipeline stages, `{assembler}` wildcard, output tree | [docs/PIPELINE.md](docs/PIPELINE.md) |
 | Config schema and every opt-in flag | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
@@ -112,6 +113,7 @@ Long-form documentation lives under [`docs/`](docs/README.md):
 | **Rebuild the classification DBs from one NCBI snapshot** | [docs/REFRESH_TUTORIAL.md](docs/REFRESH_TUTORIAL.md) |
 | Per-(sample, virus) CSV schema + multi-run merge | [docs/PER_VIRUS_OUTPUT.md](docs/PER_VIRUS_OUTPUT.md) |
 | Parity invariants with the original `virusHanter` | [docs/PARITY_NOTES.md](docs/PARITY_NOTES.md) |
+| Parity sign-off procedure and checklist | [docs/PARITY_SIGNOFF.md](docs/PARITY_SIGNOFF.md) |
 | Local smoke testing | [test/README.md](test/README.md) |
 | Project conventions for AI assistants | [CLAUDE.md](CLAUDE.md) |
 

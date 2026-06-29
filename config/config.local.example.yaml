@@ -1,0 +1,59 @@
+# config/config.local.example.yaml
+#
+# Ready-to-edit starting point for a real run. Copy it and edit the paths:
+#
+#   cp config/config.local.example.yaml config/config.local.yaml
+#   $EDITOR config/config.local.yaml
+#
+# The example paths follow the layout in docs/DEPLOY_LINUX.md
+# (reference databases under /data/refdbs, results under /data/results).
+# Edit every path to your server. See docs/DATABASE_SETUP.md for how to
+# obtain each database and docs/CONFIGURATION.md for the full key list.
+
+# Directory of paired FASTQs for ONE run/batch. Discovery is a flat scan
+# of this directory (not recursive): it must hold only the paired FASTQs
+# for that run, an even count, with R1/R2 sorting adjacently. When
+# processing several runs, override this per invocation on the CLI:
+#   snakemake ... --config SAMPLES=/data/runs/run01
+SAMPLES: "/data/runs/run01"
+
+# Where results are written. Each run lands under
+# {RESULTS_FOLDER}/<basename of SAMPLES>/ with its own
+# run_information_<run>.csv and per_virus_<run>.csv.
+RESULTS_FOLDER: "/data/results"
+
+THREADS: 16
+CLEAN: "FALSE"
+
+# --- Reference databases ---------------------------------------------
+# Built by refresh/refresh_virus_parquet.smk (see step 2 of
+# docs/DEPLOY_LINUX.md): VIRUS_PARQUET, TAXDUMP_NODES, KAIJU_DB,
+# KRAKEN_DB and BLASTN_DB all come from one coordinated NCBI viral
+# RefSeq snapshot.
+VIRUS_PARQUET: "/data/refdbs/virus_ref/all_viruses.parquet"
+TAXDUMP_NODES: "/data/refdbs/virus_ref/nodes.dmp"
+KAIJU_DB:      "/data/refdbs/virus_ref/kaiju_refseq_viral"
+KRAKEN_DB:     "/data/refdbs/virus_ref/kraken2_refseq_viral"
+BLASTN_DB:     "/data/refdbs/virus_ref/blast_refseq_viral/viral_rna_mito"
+
+# Obtained separately (not built by the refresh workflow):
+HUMAN_INDEX:   "/data/refdbs/human/human_gencode"      # bwa index prefix
+CHECKV_DB:     "/data/refdbs/checkv/checkv-db-v1.5"
+
+# --- Tuning ----------------------------------------------------------
+CONTIG_LENGTH: 500
+NUMBER_OF_PLOTS: 20
+COVERAGE_WINDOW: 100
+
+# --- Optional stages (defaults shown) --------------------------------
+MULTIQC: "TRUE"
+DEDUPLICATE: "FALSE"
+QUAST: "FALSE"
+GENOMAD: "FALSE"
+GENOMAD_DB: ""
+
+# Optional secondary host (e.g. mouse). Leave commented out when unused.
+# SECONDARY_HOST_INDEX: "/data/refdbs/mouse/mouse_index"
+# SECONDARY_HOST_NAME: "Mouse"
+
+# End of config.local.example.yaml
