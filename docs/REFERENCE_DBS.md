@@ -1,9 +1,10 @@
 # Reference databases
 
-The pipeline consumes several reference databases. All currently live
-under `/Volumes/LaCie/REGIONEN/ref_dbs/` and are referenced by the
-production config at
-`virusHanter2/config/config.production.yaml`.
+The pipeline consumes several reference databases. Paths below use
+`$VH2_ROOT` as the deployment base (see
+[DEPLOY_LINUX.md](DEPLOY_LINUX.md)); substitute your own. They live
+under `$VH2_ROOT/ref_dbs/` and are referenced by the production config
+at `virusHanter2/config/config.production.yaml`.
 
 | DB | Path | Used by | Refresh cadence |
 |---|---|---|---|
@@ -138,9 +139,9 @@ Pre-2026-05-21 builds used viral RefSeq alone. Reproduce that with:
 ```
 python scripts/build_virus_parquet.py \
     --source refseq --no-one-rep-per-taxid \
-    --fasta /Volumes/LaCie/REGIONEN/ref_dbs/VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna \
-    --taxid /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz \
-    --out   /Volumes/LaCie/REGIONEN/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses_refseq.parquet
+    --fasta $VH2_ROOT/ref_dbs/VIRUS_FASTA/viral_refseq_<YYYYMMDD>.fna \
+    --taxid $VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nucl_gb.accession2taxid.gz \
+    --out   $VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses_refseq.parquet
 ```
 
 Last successful RefSeq-only rebuild on this workstation (2026-05-17):
@@ -172,7 +173,7 @@ while keeping the row count in the same order of magnitude.
   ```bash
   hostile index fetch \
       --name human-t2t-hla.rs-viral-202401_ml-phage-202401 \
-      --out /Volumes/LaCie/REGIONEN/ref_dbs/HOSTILE/
+      --out $VH2_ROOT/ref_dbs/HOSTILE/
   ```
 
   and point `HOSTILE_INDEX` at that directory. The bundle is
@@ -195,13 +196,13 @@ while keeping the row count in the same order of magnitude.
 
   ```bash
   conda activate <env with genomad>
-  cd /Volumes/LaCie/REGIONEN/ref_dbs
+  cd $VH2_ROOT/ref_dbs
   mkdir -p GENOMAD_DB && cd GENOMAD_DB
   genomad download-database .
   # produces ./genomad_db/
   ```
 
-  Then set `GENOMAD_DB: "/Volumes/LaCie/REGIONEN/ref_dbs/GENOMAD_DB/genomad_db"`
+  Then set `GENOMAD_DB: "$VH2_ROOT/ref_dbs/GENOMAD_DB/genomad_db"`
   in your config. A manual fallback is the Zenodo mirror at
   `https://zenodo.org/records/14886553`; extract the tarball and
   point `GENOMAD_DB` at the resulting `genomad_db/` directory.
@@ -209,8 +210,8 @@ while keeping the row count in the same order of magnitude.
   Performance caveat: `genomad end-to-end` calls mmseqs2, which
   does many small random reads against the ~228 k marker profiles.
   Running with the DB on an external USB drive is impractical
-  (9+ hour stall observed on this workstation with the geNomad DB
-  on LaCie). For real-data runs, stage the DB on local SSD or a
+  (9+ hour stall observed with the geNomad DB on an external USB
+  drive). For real-data runs, stage the DB on local SSD or a
   fast network filesystem before flipping `GENOMAD: "TRUE"`.
 
 ## Apple Silicon / RAM-limited host notes

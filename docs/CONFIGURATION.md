@@ -66,9 +66,10 @@ so a misconfigured run fails immediately.
 
 ## Production config
 
-`config/config.production.yaml` is the workstation-ready config
-pointing at the LaCie reference databases at
-`/Volumes/LaCie/REGIONEN/ref_dbs/`. Use it as a template:
+`config/config.production.yaml` is a ready-made config pointing at the
+reference databases under `$VH2_ROOT/ref_dbs/` (`$VH2_ROOT` is the
+deployment base; see [DEPLOY_LINUX.md](DEPLOY_LINUX.md)). Use it as a
+template:
 
 ```
 snakemake --sdm conda --cores 4 --configfile config/config.production.yaml
