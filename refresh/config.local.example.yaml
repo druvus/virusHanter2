@@ -1,0 +1,33 @@
+# refresh/config.local.example.yaml
+#
+# Ready-to-edit config for the database refresh workflow
+# (refresh/refresh_virus_parquet.smk), which builds VIRUS_PARQUET, the
+# Kaiju FMI, the Kraken2 viral DB, the BLAST viral alias and the taxdump
+# from one coordinated NCBI viral RefSeq snapshot. Copy and edit:
+#
+#   cp refresh/config.local.example.yaml refresh/config.local.yaml
+#   $EDITOR refresh/config.local.yaml
+#
+# See docs/REFRESH_TUTORIAL.md and step 2 of docs/DEPLOY_LINUX.md.
+
+# Output parquet. Every other database is published next to it:
+#   <parent>/nodes.dmp, <parent>/names.dmp
+#   <parent>/kaiju_refseq_viral/   <parent>/kraken2_refseq_viral/
+#   <parent>/blast_refseq_viral/viral_rna_mito(.nal)
+OUTPUT_PARQUET: "/data/refdbs/virus_ref/all_viruses.parquet"
+
+# Scratch workdir for downloads and intermediates (~40 GB during the run).
+DOWNLOAD_DIR: "/data/refdbs/virus_ref/_refresh_workdir"
+
+# The overlap diagnostic (compare_with_kraken2) inspects an existing
+# Kraken2 DB. On a fresh server, point this at the DB this workflow
+# publishes and skip the diagnostic on the first build with
+# `--omit-from compare_with_kraken2`; optionally re-run later without the
+# flag to generate all_viruses_vs_kraken2.tsv.
+KRAKEN_DB_FOR_COMPARE: "/data/refdbs/virus_ref/kraken2_refseq_viral"
+
+# Source URLs default to the canonical NCBI FTP paths; override only to
+# pin a specific snapshot. BLAST tarball set also has a sensible default.
+# BLAST_NAMES: ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
+
+# End of config.local.example.yaml
