@@ -467,6 +467,13 @@ rule publish_kaiju_refseq_viral:
         cp {input.fmi} {output.fmi}
         cp {input.nodes} {output.nodes}
         cp {input.names} {output.names}
+        # Provenance stamp: the published Kaiju dir name is not
+        # version-bearing, so record the build date + source here.
+        # The main pipeline's db_build_identity reads this sidecar to
+        # report a robust KAIJU_DB identity instead of a bare mtime.
+        printf '{{"build_date_utc": "%s", "source": "refseq-viral"}}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > "$(dirname {output.fmi})/build_stats.json"
         """
 
 
@@ -574,6 +581,12 @@ rule publish_kraken2_refseq_viral:
         cp {input.opts} {output.opts}
         cp {input.seqid} {output.seqid}
         cp {input.inspect} {output.inspect}
+        # Provenance stamp: the freshly built Kraken2 dir name is not
+        # version-bearing (unlike a downloaded k2_pluspf_YYYYMMDD), so
+        # record the build date + source for db_build_identity to read.
+        printf '{{"build_date_utc": "%s", "source": "refseq-viral"}}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > "$(dirname {output.hash})/build_stats.json"
         """
 
 

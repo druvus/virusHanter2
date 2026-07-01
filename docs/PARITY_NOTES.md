@@ -348,6 +348,33 @@ so metaSPAdes runs alongside MEGAHIT on a Mac without
 failure" fallback so a SPAdes refusal (it imposes a per-library
 minimum) does not tear the DAG down.
 
+## Additive: provenance (databases + application versions)
+
+The run records which reference databases and application versions
+produced it (see [PROVENANCE.md](PROVENANCE.md)). This is **purely
+additive**:
+
+- `run_information_<batch>.csv` gains two trailing columns after the
+  existing provenance block: `databases_build_identity` (one
+  `KEY=<identity>` per DB, preferring a robust build stamp over an
+  mtime) and `tool_versions` (the conda-resolved headline tool
+  versions, e.g. `fastp=0.24.0;kraken2=2.1.3`). Both are blank on a
+  legacy run, so a column-dropped diff stays clean. The parity-locked
+  first 14 columns are untouched.
+- Two new run-level outputs are produced, `software_versions.tsv` and
+  `run_provenance_<batch>.json`; neither feeds another rule nor alters
+  an existing one.
+- The HTML report gains a `Provenance` tab. The rendered HTML is
+  already an "expected to differ" column in parity, so this does not
+  affect the locked schema.
+
+Drop the new trailing columns before diffing:
+
+```
+csvcut -C databases_build_identity,tool_versions,html_report \
+    run_information_<batch>.csv | sort > new.csv
+```
+
 ## 2026-05-19: `bam2plot` retired
 
 The `bam2plot` rule that produced `COVERAGE_PLOTS/*.svg` and the

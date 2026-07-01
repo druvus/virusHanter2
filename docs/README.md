@@ -15,6 +15,7 @@ that is too long to keep there.
 | Reference databases — production paths, refresh cadence | [REFERENCE_DBS.md](REFERENCE_DBS.md) |
 | **Rebuild the classification databases with one snapshot** | [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md) |
 | Per-(sample, virus) CSV schema + multi-run merge | [PER_VIRUS_OUTPUT.md](PER_VIRUS_OUTPUT.md) |
+| Provenance — database + application versions per run | [PROVENANCE.md](PROVENANCE.md) |
 
 ## Conventions and provenance
 

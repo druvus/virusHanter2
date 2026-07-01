@@ -110,6 +110,32 @@ def test_run_information_trailing_columns_follow_locked_prefix(tmp_path):
     assert cols[: len(PARITY_LOCKED_COLUMNS)] == PARITY_LOCKED_COLUMNS
     assert "duplicate_pairs" in cols[len(PARITY_LOCKED_COLUMNS) :]
     assert "host_removal_tool" in cols[len(PARITY_LOCKED_COLUMNS) :]
+    # Provenance / version columns are additive and follow the locked prefix.
+    assert "databases_build_identity" in cols[len(PARITY_LOCKED_COLUMNS) :]
+    assert "tool_versions" in cols[len(PARITY_LOCKED_COLUMNS) :]
+
+
+def test_tool_versions_column_reads_software_versions_tsv(tmp_path):
+    sample = _build_sample(tmp_path)
+    versions = tmp_path / "software_versions.tsv"
+    versions.write_text(
+        "env\tpackage\tversion\tbuild\n"
+        "fastp\tfastp\t0.24.0\th5f740d0_0\n"
+        "kraken\tkraken2\t2.1.3\tpl5321_0\n"
+        "kraken\tpython\t3.12.2\th1\n"
+    )
+    from scripts.aggregate_run_information import _tool_versions_string
+
+    cell = _tool_versions_string(versions)
+    # Headline tools only, compact and sorted; incidental python dropped.
+    assert cell == "fastp=0.24.0;kraken2=2.1.3"
+
+
+def test_tool_versions_blank_when_missing(tmp_path):
+    from scripts.aggregate_run_information import _tool_versions_string
+
+    assert _tool_versions_string(None) == ""
+    assert _tool_versions_string(tmp_path / "absent.tsv") == ""
 
 
 def test_genomad_columns_populate_from_improved_contigs_path(tmp_path):
