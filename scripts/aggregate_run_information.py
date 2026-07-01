@@ -19,168 +19,37 @@ from reporthanter import FlagstatProcessor
 # Pull in the pipeline-side helper for hex-encoding the HTML blob.
 from scripts.functions import read_file_as_blob
 
-
-# Config keys whose values name a reference database the workflow
-# consumed. Captured in the run-info CSV under `databases_used` so
-# diagnostic provenance survives a future DB refresh.
-_DB_CONFIG_KEYS = (
-    "HUMAN_INDEX",
-    "KAIJU_DB",
-    "KRAKEN_DB",
-    "BLASTN_DB",
-    "CHECKV_DB",
-    "VIRUS_PARQUET",
-    "GENOMAD_DB",
-    "SECONDARY_HOST_INDEX",
+# Reference-database build identity (robust stamp over mtime) and
+# short-path rendering live in scripts/provenance.py so the sidecar
+# writer reuses exactly the same logic. Tool versions come from the
+# resolved-version collector.
+from scripts.collect_software_versions import headline_versions
+from scripts.provenance import (
+    databases_build_identity_string,
+    databases_provenance_span_days,
+    databases_provenance_string,
+    databases_used_string,
+    db_build_identity,
 )
 
 
-def _databases_used_string(cfg: dict) -> str:
-    """Render the DB paths the workflow used as a single semicolon-
-    delimited ``KEY=VALUE`` string, suitable for a CSV cell.
-
-    Empty / unset keys are dropped so the cell stays compact when
-    optional databases (geNomad, secondary host) are not configured.
+def _tool_versions_string(software_versions_tsv: Path | None) -> str:
+    """Render the resolved headline tool versions as a compact
+    ``fastp=0.24.0;bwa=0.7.18;...`` cell. Empty when the collector
+    output is missing (e.g. a legacy run) so a column-dropped parity
+    diff stays clean.
     """
-    parts: list[str] = []
-    for key in _DB_CONFIG_KEYS:
-        value = cfg.get(key, "")
-        if not value:
-            continue
-        parts.append(f"{key}={value}")
-    return ";".join(parts)
-
-
-def _db_provenance_dates(cfg: dict) -> dict[str, str]:
-    """Resolve a per-DB ISO-date string for each configured reference.
-
-    The intent is a one-line audit of "did all the classifier DBs
-    come from the same snapshot?". The function prefers:
-
-      1. A ``build_stats.json`` sidecar next to ``VIRUS_PARQUET``
-         (carries an explicit ``build_date_utc`` field that the
-         refresh workflow writes).
-      2. The on-disk mtime of a representative file under each DB
-         directory / prefix.
-
-    Returns an ordered mapping of ``KEY -> 'YYYY-MM-DD'``.
-    """
-    import datetime as _dt
-    import json as _json
-
-    out: dict[str, str] = {}
-
-    def _mtime(p: Path) -> str:
-        try:
-            ts = p.stat().st_mtime
-            return _dt.datetime.fromtimestamp(ts, _dt.UTC).date().isoformat()
-        except OSError:
-            return ""
-
-    # VIRUS_PARQUET prefers the sidecar; falls back to file mtime.
-    parquet_path = cfg.get("VIRUS_PARQUET", "")
-    if parquet_path:
-        parquet = Path(parquet_path)
-        sidecar = parquet.with_suffix("").with_suffix("").with_name(
-            parquet.stem + "_build_stats.json"
-        )
-        if sidecar.is_file():
-            try:
-                with sidecar.open() as fh:
-                    data = _json.load(fh)
-                build_date = data.get("build_date_utc", "")
-                if build_date:
-                    out["VIRUS_PARQUET"] = str(build_date)[:10]
-            except (OSError, ValueError):
-                pass
-        if "VIRUS_PARQUET" not in out and parquet.is_file():
-            out["VIRUS_PARQUET"] = _mtime(parquet)
-
-    # Directory-backed DBs: pick a representative inner file (the
-    # one mosdepth-like consumers actually read at run time) so the
-    # mtime reflects the last DB rebuild rather than the directory
-    # touch.
-    candidates: dict[str, list[str]] = {
-        "KAIJU_DB": ["*.fmi", "nodes.dmp"],
-        "KRAKEN_DB": ["taxo.k2d", "hash.k2d"],
-        "CHECKV_DB": ["genome_db/checkv_reps.dmnd", "checkv-db-v*.tsv"],
-        "GENOMAD_DB": ["names.dmp", "genomad_db.dmnd"],
-    }
-    for key, patterns in candidates.items():
-        root = cfg.get(key, "")
-        if not root:
-            continue
-        rp = Path(root)
-        if not rp.is_dir():
-            continue
-        picked: Path | None = None
-        for pattern in patterns:
-            matches = sorted(rp.glob(pattern))
-            if matches:
-                picked = matches[0]
-                break
-        if picked is None:
-            picked = rp
-        date = _mtime(picked)
-        if date:
-            out[key] = date
-
-    # Prefix-backed DBs (BWA / BLAST): probe a sibling file with the
-    # appropriate suffix.
-    prefix_keys: dict[str, list[str]] = {
-        "HUMAN_INDEX": [".bwt", ".0123"],
-        "BLASTN_DB": [".nhr", ".nal"],
-        "SECONDARY_HOST_INDEX": [".bwt", ".0123"],
-    }
-    for key, suffixes in prefix_keys.items():
-        prefix = cfg.get(key, "")
-        if not prefix:
-            continue
-        for suffix in suffixes:
-            probe = Path(prefix + suffix)
-            if probe.exists():
-                date = _mtime(probe)
-                if date:
-                    out[key] = date
-                break
-
-    # TAXDUMP_NODES is a single file when configured.
-    taxdump = cfg.get("TAXDUMP_NODES", "")
-    if taxdump:
-        path = Path(taxdump)
-        if path.is_file():
-            out["TAXDUMP_NODES"] = _mtime(path)
-
-    return out
-
-
-def _databases_provenance_string(cfg: dict) -> str:
-    """Serialise the per-DB build dates as a semicolon-delimited
-    ``KEY=YYYY-MM-DD`` cell, paralleling ``_databases_used_string``.
-    Empty dates are dropped so the cell remains compact.
-    """
-    dates = _db_provenance_dates(cfg)
-    return ";".join(f"{k}={v}" for k, v in dates.items() if v)
-
-
-def _databases_provenance_span_days(cfg: dict) -> int:
-    """Return the span in days between the oldest and newest DB
-    build dates. Useful for surfacing the cross-DB coordination
-    state to the operator. Returns 0 when fewer than two dates can
-    be resolved.
-    """
-    import datetime as _dt
-
-    dates = _db_provenance_dates(cfg)
-    parsed: list[_dt.date] = []
-    for value in dates.values():
-        try:
-            parsed.append(_dt.date.fromisoformat(value))
-        except ValueError:
-            continue
-    if len(parsed) < 2:
-        return 0
-    return (max(parsed) - min(parsed)).days
+    if software_versions_tsv is None or not Path(software_versions_tsv).is_file():
+        return ""
+    rows: list[dict[str, str]] = []
+    with Path(software_versions_tsv).open() as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        for line in fh:
+            values = line.rstrip("\n").split("\t")
+            if len(values) == len(header):
+                rows.append(dict(zip(header, values)))
+    headline = headline_versions(rows)
+    return ";".join(f"{tool}={ver}" for tool, ver in sorted(headline.items()))
 
 
 def _parse_quast_report(report_tsv: Path) -> dict[str, float | int]:
@@ -221,6 +90,8 @@ def aggregate_sample_info(
     databases_used: str = "",
     databases_provenance: str = "",
     databases_span_days: int = 0,
+    databases_build_identity: str = "",
+    tool_versions: str = "",
     reporthanter_version: str = "",
     assemblers: list[str] | None = None,
 ) -> pd.DataFrame:
@@ -454,6 +325,16 @@ def aggregate_sample_info(
         # workflow assumes is no longer guaranteed.
         "databases_provenance": databases_provenance,
         "databases_span_days": databases_span_days,
+        # `databases_build_identity` carries one `KEY=<identity>` per DB,
+        # preferring a robust build stamp (the refresh workflow's
+        # build_stats.json source+date, or the version-bearing directory
+        # name such as `checkv-db-v1.5` / `k2_pluspf_20240112`) over a
+        # bare mtime. `tool_versions` records the conda-resolved version
+        # of each headline tool that actually ran
+        # (`fastp=0.24.0;bwa=0.7.18;...`). Both are blank on legacy runs
+        # so a column-dropped parity diff stays clean.
+        "databases_build_identity": databases_build_identity,
+        "tool_versions": tool_versions,
         "reporthanter_version": reporthanter_version,
         # Trailing multi-assembler diagnostics. `assemblers_used` is a
         # semicolon-delimited list of assemblers run for this sample;
@@ -479,9 +360,11 @@ def main() -> None:
     samples = [Path(report).parent.parent.name for report in sm.input.reports]
 
     cfg = dict(sm.config)
-    databases_used = _databases_used_string(cfg)
-    databases_provenance = _databases_provenance_string(cfg)
-    databases_span_days = _databases_provenance_span_days(cfg)
+    identity = db_build_identity(cfg)
+    databases_used = databases_used_string(identity)
+    databases_provenance = databases_provenance_string(identity)
+    databases_span_days = databases_provenance_span_days(identity)
+    databases_build_identity = databases_build_identity_string(identity)
     if databases_span_days > 180:
         print(
             "[aggregate_run_information] WARNING: reference DB build "
@@ -491,6 +374,10 @@ def main() -> None:
             "rebuild VIRUS_PARQUET and KAIJU_DB from a current "
             "snapshot."
         )
+    software_versions_tsv = getattr(sm.input, "software_versions", None)
+    tool_versions = _tool_versions_string(
+        Path(software_versions_tsv) if software_versions_tsv else None
+    )
     reporthanter_version = getattr(reporthanter, "__version__", "")
     assemblers = list(sm.params.get("assemblers", ["MEGAHIT"]))
 
@@ -500,6 +387,8 @@ def main() -> None:
             databases_used=databases_used,
             databases_provenance=databases_provenance,
             databases_span_days=databases_span_days,
+            databases_build_identity=databases_build_identity,
+            tool_versions=tool_versions,
             reporthanter_version=reporthanter_version,
             assemblers=assemblers,
         )

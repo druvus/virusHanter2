@@ -338,6 +338,7 @@ include: "rules/pre_processing.smk"
 include: "rules/classification.smk"
 include: "rules/assembly.smk"
 include: "rules/post_processing.smk"
+include: "rules/provenance.smk"
 
 # Trivial rules that should run on the submission host rather than be queued.
 # Note: `wrangle_kraken`, `wrangle_pilon`, and `merge_checkv_blastn` need
@@ -355,6 +356,12 @@ rule all:
         # Per-(sample, virus) detail CSV for the collaborator; concatenated
         # across samples by the aggregate_per_virus rule.
         f"{RESULT_FOLDER}/per_virus_{Path(SAMPLES_FOLDER).name}.csv",
+        # Provenance: resolved tool versions + the run provenance sidecar
+        # (DB build identity + versions) that the reports render. Always
+        # produced so every run records what databases and applications
+        # were used.
+        f"{RESULT_FOLDER}/software_versions.tsv",
+        f"{RESULT_FOLDER}/run_provenance_{Path(SAMPLES_FOLDER).name}.json",
         # Per-sample additive QC outputs (do not feed any other rule).
         # markdup stats exist only for the bwa backend; the hostile
         # backend has no bwa human BAM to mark duplicates on, so demanding

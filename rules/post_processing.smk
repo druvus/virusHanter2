@@ -129,6 +129,11 @@ rule generate_report:
         kaiju_table=rules.kaiju_to_table.output.kaiju_table,
         mosdepth_regions=rules.mosdepth_kraken_hits.output.regions,
         virus_names=rules.bwa_align_to_kraken_hits.output.virus_names,
+        # Per-run provenance sidecar (DB build identity + resolved tool
+        # versions) rendered as the report's Provenance tab. Referenced by
+        # path (provenance.smk is included after this file); it depends on
+        # config + the version probes only, so there is no DAG cycle.
+        provenance=f"{RESULT_FOLDER}/run_provenance_{Path(config['SAMPLES']).name}.json",
         # When QUAST is enabled, surface every per-assembler report
         # inside the HTML as an Alignment Stats sub-tab.
         **(
@@ -202,6 +207,7 @@ rule generate_report:
             --flagstat_file {input.flagstat} \
             --mosdepth_regions {input.mosdepth_regions} \
             --virus_names {input.virus_names} \
+            --provenance_file {input.provenance} \
             {params.quast_args} \
             {params.genomad_args} \
             --output {output.report_html} \
@@ -376,6 +382,9 @@ rule multiqc:
 rule aggregate_run_information:
     input:
         reports=expand(f"{RESULT_FOLDER}/{{sample}}/REPORT/{{sample}}.html", sample=SAMPLES),
+        # Resolved tool versions for the additive `tool_versions` column.
+        # Referenced by path (provenance.smk is included after this file).
+        software_versions=f"{RESULT_FOLDER}/software_versions.tsv",
     output:
         run_info_csv=f"{RESULT_FOLDER}/run_information_{Path(config['SAMPLES']).name}.csv",
     params:
