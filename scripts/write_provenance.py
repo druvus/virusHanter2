@@ -9,16 +9,19 @@ diffable across runs. Standard library only.
 Per project convention no absolute path is ever written -- database
 paths are reduced to their parent folder and leaf by
 ``scripts.provenance.short_path``.
-"""
 
-from __future__ import annotations
+Note: no ``from __future__ import annotations`` here. Snakemake prepends
+its own boilerplate when materialising a ``script:`` rule, so a future
+import would no longer sit at the top of the file and would raise a
+SyntaxError. The py>=3.11 rule env evaluates the annotations natively.
+"""
 
 import csv
 import datetime as _dt
 import json
 from pathlib import Path
 
-from scripts.collect_software_versions import collect_versions, headline_versions
+from scripts.collect_software_versions import headline_versions, read_versions_table
 from scripts.provenance import db_build_identity
 
 # Order databases in the sidecar the way an operator reads a run: host,
@@ -86,7 +89,10 @@ def main() -> None:
     cfg = dict(sm.config)
 
     software_tsv = getattr(sm.input, "software_versions", None)
-    software_rows = collect_versions([Path(software_tsv)]) if software_tsv else []
+    # The input is the merged software_versions.tsv (header + rows), so
+    # read it back with read_versions_table -- NOT collect_versions,
+    # which parses the raw env<TAB>stem probe dumps.
+    software_rows = read_versions_table(Path(software_tsv)) if software_tsv else []
 
     generated_utc = sm.params.get("generated_utc", "") or (
         _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()

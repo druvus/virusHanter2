@@ -11,9 +11,13 @@ which the provenance sidecar, the run-info CSV and the HTML report reuse.
 
 Standard library only (parsing must not assume pandas): a probe env such
 as ``fastp`` carries no Python, so parsing lives here, not in the shell.
-"""
 
-from __future__ import annotations
+Note: no ``from __future__ import annotations`` here. Snakemake prepends
+its own boilerplate when materialising a ``script:`` rule, so a future
+import would no longer sit at the top of the file and would raise a
+SyntaxError. The py>=3.11 rule envs evaluate the PEP 604/585 annotations
+below natively.
+"""
 
 import csv
 from pathlib import Path
@@ -84,6 +88,28 @@ def collect_versions(probe_tsvs: list[Path]) -> list[dict[str, str]]:
                     {"env": env, "package": name, "version": version, "build": build}
                 )
     rows.sort(key=lambda r: (r["env"], r["package"]))
+    return rows
+
+
+def read_versions_table(path: Path) -> list[dict[str, str]]:
+    """Read a merged ``software_versions.tsv`` (header + env/package/
+    version/build rows) back into row dicts.
+
+    This is the inverse of :func:`write_software_versions`; use it to
+    reload the collector's output, NOT :func:`collect_versions` (which
+    parses the raw ``env<TAB>stem`` probe dumps). Returns an empty list
+    when the file is absent so a legacy run degrades cleanly.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return []
+    rows: list[dict[str, str]] = []
+    with p.open() as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        for line in fh:
+            values = line.rstrip("\n").split("\t")
+            if len(values) == len(header):
+                rows.append(dict(zip(header, values)))
     return rows
 
 
