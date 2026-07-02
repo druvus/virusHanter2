@@ -2,13 +2,13 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - bwa>=0.7.17
-  - samtools>=1.18
+  - bwa>=0.7.19
+  - samtools>=1.23.1
   # bwa_align_to_kraken_hits is now a `script:` that reads the
   # VIRUS_PARQUET, walks the NCBI taxdump for ICTV species names,
   # and writes the virus_names sidecar. Needs python + pandas +
   # pyarrow (parquet) at runtime.
   - python>=3.12
   - pandas>=3
-  - pyarrow
-  - numpy>=1.24
+  - pyarrow>=24.0.0
+  - numpy>=2.5.0
