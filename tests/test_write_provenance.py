@@ -13,6 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from scripts.collect_software_versions import (  # noqa: E402
+    collect_versions,
+    headline_versions,
+    read_versions_table,
+    write_software_versions,
+)
 from scripts.write_provenance import build_provenance  # noqa: E402
 
 
@@ -54,6 +60,20 @@ def test_build_provenance_shape(tmp_path):
     assert prov["software_headline"] == {"fastp": "0.24.0", "kraken2": "2.1.3"}
     # Full software table is preserved.
     assert any(r["package"] == "python" for r in prov["software"])
+
+
+def test_software_versions_roundtrip_feeds_headline(tmp_path):
+    # Regression: write_provenance must read the MERGED software_versions.tsv
+    # (via read_versions_table), not re-parse it as raw probe dumps. The
+    # merged table -> read back -> headline must recover the tool versions,
+    # otherwise the sidecar's software_headline comes out empty.
+    probe = tmp_path / "kraken.tsv"
+    probe.write_text("kraken\tkraken2-2.1.3-b0\nkraken\tpython-3.12.2-h1\n")
+    merged = tmp_path / "software_versions.tsv"
+    write_software_versions(collect_versions([probe]), merged)
+
+    rows = read_versions_table(merged)
+    assert headline_versions(rows) == {"kraken2": "2.1.3"}
 
 
 def test_build_provenance_never_leaks_absolute_path(tmp_path):
