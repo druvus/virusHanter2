@@ -21,8 +21,47 @@ from scripts.functions import (  # noqa: E402
     common_suffix,
     dummy_contig_sentinel,
     paired_reads,
+    read_table_or_empty,
     wrangle_kraken,
 )
+
+_KRAKEN_COLS = ["percent", "count_clades", "count", "tax_lvl", "taxonomy_id", "name"]
+
+
+def test_read_table_or_empty_reads_normal_file(tmp_path):
+    # `columns` is only the fallback schema for the empty case; a
+    # non-empty file is read with the caller's header/names as usual.
+    p = tmp_path / "t.tsv"
+    p.write_text("a\tb\n1\t2\n3\t4\n")
+    df = read_table_or_empty(p, columns=["a", "b"], sep="\t")
+    assert list(df.columns) == ["a", "b"]
+    assert len(df) == 2
+
+
+def test_read_table_or_empty_zero_byte_returns_empty_with_columns(tmp_path):
+    p = tmp_path / "empty.tsv"
+    p.write_text("")  # 0 bytes
+    df = read_table_or_empty(p, columns=["a", "b"], sep="\t", header=None)
+    assert list(df.columns) == ["a", "b"]
+    assert df.empty
+
+
+def test_read_table_or_empty_missing_file_returns_empty_with_columns(tmp_path):
+    df = read_table_or_empty(tmp_path / "absent.tsv", columns=["a", "b"])
+    assert list(df.columns) == ["a", "b"]
+    assert df.empty
+
+
+def test_wrangle_kraken_tolerates_zero_byte_report(tmp_path):
+    # A sample with zero reads reaching classification can leave a 0-byte
+    # Kraken report; wrangle_kraken must not raise EmptyDataError.
+    empty = tmp_path / "empty.kraken.report"
+    empty.write_text("")
+    df = wrangle_kraken(str(empty))
+    assert df.empty
+    # The domain column is present so the wrangled CSV is header-only and
+    # every downstream reader stays safe.
+    assert set(_KRAKEN_COLS + ["domain"]).issubset(df.columns)
 
 
 def _touch_all(directory: Path, names: list[str]) -> None:

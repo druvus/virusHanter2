@@ -746,6 +746,27 @@ def fastx_file_to_df(fastx_file: str) -> pd.DataFrame:
     )
 
 
+def read_table_or_empty(
+    path, columns: list[str], sep: str = ",", **read_csv_kwargs
+) -> pd.DataFrame:
+    """Read a delimited file, tolerating a missing or 0-byte file.
+
+    A sample with few or zero reads reaching classification can leave a
+    raw Kraken2 / Kaiju output that is empty; a bare ``pd.read_csv`` on a
+    0-byte file raises ``pandas.errors.EmptyDataError``. This helper
+    returns an empty ``DataFrame`` carrying ``columns`` instead, so the
+    analysis finishes with an empty (rather than crashed) result and the
+    schema every downstream reader expects is preserved.
+    """
+    p = Path(path)
+    if not p.is_file() or p.stat().st_size == 0:
+        return pd.DataFrame(columns=columns)
+    try:
+        return pd.read_csv(p, sep=sep, **read_csv_kwargs)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(columns=columns)
+
+
 def wrangle_kraken(kraken_file: str) -> pd.DataFrame:
     """Parse a Kraken2 report TSV into a DataFrame with an explicit `domain`
     column carried down from the nearest D/U/R/R1 parent row.
@@ -761,8 +782,9 @@ def wrangle_kraken(kraken_file: str) -> pd.DataFrame:
     D-and-below row stay identical and the parity invariant holds.
     """
     kraken = (
-        pd.read_csv(
+        read_table_or_empty(
             kraken_file,
+            columns=["percent", "count_clades", "count", "tax_lvl", "taxonomy_id", "name"],
             sep="\t",
             header=None,
             names=["percent", "count_clades", "count", "tax_lvl", "taxonomy_id", "name"],

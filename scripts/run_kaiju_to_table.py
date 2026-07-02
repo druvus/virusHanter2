@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.functions import canonicalise_taxon_names  # noqa: E402
+from scripts.functions import canonicalise_taxon_names, read_table_or_empty  # noqa: E402
 
 snakemake = snakemake  # type: ignore[name-defined]
 
@@ -48,7 +48,14 @@ if taxdump_nodes:
         names_dmp = str(names_dmp_path)
 
 if taxdump_nodes and names_dmp:
-    df = pd.read_csv(output.kaiju_table, sep="\t")
+    # A sample with zero reads reaching Kaiju can leave a 0-byte table;
+    # tolerate it so canonicalisation (a no-op on an empty frame) does not
+    # raise and a header-only table is written for downstream readers.
+    df = read_table_or_empty(
+        output.kaiju_table,
+        columns=["percent", "reads", "taxon_id", "taxon_name"],
+        sep="\t",
+    )
     df = canonicalise_taxon_names(
         df,
         taxid_col="taxon_id",
