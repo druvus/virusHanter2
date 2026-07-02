@@ -9,6 +9,6 @@ dependencies:
   # and writes the virus_names sidecar. Needs python + pandas +
   # pyarrow (parquet) at runtime.
   - python>=3.12
-  - pandas>=2.0
+  - pandas>=3
   - pyarrow
   - numpy>=1.24

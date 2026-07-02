@@ -75,7 +75,7 @@ symlink) your runs under `$VH2_ROOT/runs/`.
 # (wrangle_pilon, merge_checkv_blastn, wrangle_kraken) execute in THIS
 # env, so it also needs pandas / numpy / pyfastx / pyarrow.
 mamba create -n virushanter -c conda-forge -c bioconda \
-  'snakemake-minimal=9.23.*' 'pandas>=2.0' 'numpy>=1.24' 'pyfastx>=2.0' 'pyarrow>=14'
+  'snakemake-minimal=9.23.*' 'pandas>=3' 'numpy>=1.24' 'pyfastx>=2.0' 'pyarrow>=14'
 conda activate virushanter
 
 cd "$VH2_ROOT/code"

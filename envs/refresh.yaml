@@ -3,7 +3,7 @@ channels:
   - bioconda
 dependencies:
   - python>=3.12
-  - pandas>=2.0
+  - pandas>=3
   - pyarrow>=15
   - pyfastx>=2.1
   - wget
