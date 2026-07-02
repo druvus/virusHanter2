@@ -27,15 +27,21 @@ report can still surface `EBV`, `Epstein-Barr virus`,
 ## Quick start (Linux)
 
 ```bash
-# 1. driver environment — only snakemake itself needs to be on PATH
-#    before the first run; every per-rule tool gets a fresh conda
-#    env materialised under .snakemake/conda/ on first use.
+# 1. driver environment. Every per-rule tool gets a fresh conda env
+#    materialised under .snakemake/conda/ on first use, BUT the three
+#    run:-block rules (wrangle_kraken, wrangle_pilon, merge_checkv_blastn)
+#    execute in THIS env, so it also needs pandas / numpy / pyfastx /
+#    pyarrow -- not snakemake alone.
 conda create -n virushanter -c conda-forge -c bioconda \
-    'snakemake-minimal=9.23.*' mamba
+    'snakemake-minimal=9.23.*' 'pandas>=3' 'numpy>=2.5.0' 'pyfastx>=2.3.1' 'pyarrow>=24.0.0'
 conda activate virushanter
 
-# 2. configure
-cp config/config.yaml config/config.local.yaml   # then edit DB paths
+# 2. configure (start from the ready-shaped example, not the /path/to
+#    template config.yaml which the schema rejects on purpose). Edit the
+#    DB paths and set SAMPLES to a folder that already holds paired
+#    FASTQs -- discovery runs at parse time, so even the dry-run below
+#    fails if SAMPLES does not exist.
+cp config/config.local.example.yaml config/config.local.yaml
 
 # 3. dry-run (DAG check only; no tools invoked)
 snakemake -n --sdm conda --configfile config/config.local.yaml
@@ -43,6 +49,10 @@ snakemake -n --sdm conda --configfile config/config.local.yaml
 # 4. run
 snakemake --sdm conda --cores 8 --configfile config/config.local.yaml
 ```
+
+For a full fresh-machine walkthrough (installing conda, building every
+reference database, running per-run and merging), see
+[docs/DEPLOY_LINUX.md](docs/DEPLOY_LINUX.md).
 
 `snakemake-minimal` is pinned to match what the `reporthanter`
 rule env carries, so Snakemake's `script:` directive does not hit

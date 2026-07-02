@@ -193,7 +193,7 @@ Update your run config (e.g. `config/config.local.yaml`):
 VIRUS_PARQUET: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
 TAXDUMP_NODES: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
 KAIJU_DB:      "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
-KRAKEN_DB:     "$VH2_ROOT/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+KRAKEN_DB:     "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kraken2_refseq_viral"
 BLASTN_DB:     "$VH2_ROOT/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
 ```
 

@@ -3,7 +3,7 @@
 The workflow is described as Snakemake rules under `rules/`,
 included into a single `Snakefile`. Rules are grouped by stage.
 Throughout, `{assembler}` is a wildcard that takes a value from
-`config[ASSEMBLERS]` (default `["MEGAHIT", "SPAdes"]`), so every
+`config[ASSEMBLERS]` (default `["MEGAHIT", "metaSPAdes", "rnaviralSPAdes"]`), so every
 contig-producing rule below the de novo assemblers runs once per
 (sample, assembler) pair and lands its outputs under
 `{batch}/{sample}/{assembler}/...`.
@@ -215,6 +215,8 @@ is the basename of `SAMPLES`.
 |---|---|
 | `run_information_<batch>.csv` | one row per sample; parity-locked legacy columns + trailing per-assembler stats. |
 | `per_virus_<batch>.csv` | concatenation of every per-sample per-virus CSV. |
+| `software_versions.tsv` | conda-resolved version of every tool that ran. |
+| `run_provenance_<batch>.json` (+ `.tsv`) | reference database build identities + tool versions; rendered as the report's Provenance tab (see [PROVENANCE.md](PROVENANCE.md)). |
 | `multiqc_report.html` + `multiqc_data/` | run-level QC dashboard. |
 | `analysis_done.txt` | sentinel when `CLEAN: "TRUE"`. |
 

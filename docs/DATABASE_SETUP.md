@@ -303,9 +303,17 @@ against this database per sample per assembler.
 CHECKV_DB: "/path/to/CHECKV_DB/checkv-db-v1.5"
 ```
 
-**Source.**
+**Source.** Prefer `checkv download_database`, which fetches the
+database version matching the installed CheckV (currently
+`checkv-db-v1.5`):
 ```bash
-wget https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz
+mamba create -n checkv -c conda-forge -c bioconda 'checkv>=1.1.1'
+conda run -n checkv checkv download_database /path/to/CHECKV_DB
+```
+
+Or download the tarball directly:
+```bash
+curl -LO https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz
 tar -xzf checkv-db-v1.5.tar.gz
 ```
 
