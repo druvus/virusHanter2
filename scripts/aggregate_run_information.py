@@ -16,8 +16,9 @@ import pandas as pd
 import reporthanter
 from reporthanter import FlagstatProcessor
 
-# Pull in the pipeline-side helper for hex-encoding the HTML blob.
-from scripts.functions import read_file_as_blob
+# Pull in the pipeline-side helpers for hex-encoding the HTML blob and
+# tolerating a 0-byte Kaiju table (zero reads reaching classification).
+from scripts.functions import read_file_as_blob, read_table_or_empty
 
 # Reference-database build identity (robust stamp over mtime) and
 # short-path rendering live in scripts/provenance.py so the sidecar
@@ -174,7 +175,11 @@ def aggregate_sample_info(
     # top-N name list, which the original also included.
     kaiju_table_path = sample_folder / "KAIJU" / f"{sample_name}.kaiju.table.tsv"
     kaiju_report = read_file_as_blob(kaiju_table_path)
-    kaiju_df = pd.read_csv(kaiju_table_path, sep="\t")
+    kaiju_df = read_table_or_empty(
+        kaiju_table_path,
+        columns=["percent", "reads", "taxon_id", "taxon_name"],
+        sep="\t",
+    )
     kaiju_virus_percent = float(kaiju_df.dropna()["percent"].sum())
     top_virus_kaiju = "||".join(
         f"{row.taxon_name} ({row.reads})"

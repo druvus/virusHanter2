@@ -199,6 +199,33 @@ def test_attribute_contigs_with_no_match_returns_empty():
     assert contigs == {}
 
 
+def test_build_per_virus_rows_empty_when_no_viral_reads():
+    # A sample with zero viral reads (and, in the extreme, zero reads at
+    # all) must produce an empty per-virus frame, not crash. Empty Kraken
+    # viral rows + empty Kaiju/BLAST + total_reads == 0 exercises every
+    # zero-guard on the join path.
+    kraken_df = pd.DataFrame(
+        columns=["percent", "count_clades", "count", "tax_lvl", "taxonomy_id", "name", "domain"]
+    )
+    kaiju_df = pd.DataFrame(columns=["percent", "reads", "taxon_id", "taxon_name"])
+    blastn_df = pd.DataFrame()
+    parquet_df = pd.DataFrame(columns=["name", "tax_id"])
+
+    out = build_per_virus_rows(
+        run_name="run",
+        sample_name="s1",
+        kraken_df=kraken_df,
+        kaiju_df=kaiju_df,
+        blastn_df=blastn_df,
+        parquet_df=parquet_df,
+        summary={},
+        thresholds={},
+        total_reads=0,
+        human_reads=0,
+    )
+    assert out.empty
+
+
 def test_build_per_virus_rows_aggregates_multi_reference_taxid(tmp_path):
     kraken = _kraken_df(
         [

@@ -602,9 +602,13 @@ def main() -> None:
     args = parse_args()
 
     kraken_df = pd.read_csv(args.kraken_csv)
-    kaiju_df = (
-        pd.read_csv(args.kaiju_tsv, sep="\t") if args.kaiju_tsv.exists() else pd.DataFrame()
-    )
+    # A sample with zero reads reaching Kaiju can leave a 0-byte table; a
+    # bare read_csv would raise EmptyDataError, so treat missing / 0-byte
+    # as an empty frame carrying the expected columns and finish.
+    if args.kaiju_tsv.exists() and args.kaiju_tsv.stat().st_size > 0:
+        kaiju_df = pd.read_csv(args.kaiju_tsv, sep="\t")
+    else:
+        kaiju_df = pd.DataFrame(columns=["percent", "reads", "taxon_id", "taxon_name"])
 
     # Concatenate every per-assembler BLAST/CheckV merged CSV. Each
     # has an `assembler` column written by `wrangle_pilon`. Skip
