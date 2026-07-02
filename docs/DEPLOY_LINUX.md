@@ -60,12 +60,30 @@ symlink) your runs under `$VH2_ROOT/runs/`.
 
 ## 0. Prerequisites
 
-- Linux (required: CheckV 1.0.3 misbehaves on macOS).
-- conda / mamba (miniforge recommended).
+- Linux (required: CheckV misbehaves on macOS).
 - Disk: ~40 GB scratch for the database build, ~5 GB published viral DBs,
   ~14 GB human BWA index, ~2 GB CheckV, plus results. RAM: the
   viral-scoped Kraken2 / Kaiju built below are light (a few GB); the
   human BWA index needs ~4 GB at run time.
+
+A fresh box has none of the tooling below. Bootstrap conda/mamba, git
+and a downloader once (skip any part you already have):
+
+```bash
+# System tools (Debian/Ubuntu; use dnf/yum on RHEL/Fedora).
+sudo apt-get update && sudo apt-get install -y git curl wget bzip2
+
+# Miniforge provides `conda` and `mamba`. Skip if conda already exists.
+curl -L -o /tmp/miniforge.sh \
+  https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash /tmp/miniforge.sh -b -p "$HOME/miniforge3"
+source "$HOME/miniforge3/etc/profile.d/conda.sh"   # add this line to ~/.bashrc to persist
+conda activate base
+```
+
+`conda` must be on the `PATH` of every shell you deploy from; the
+`source ... conda.sh` line (added to `~/.bashrc` above) and
+`conda activate virushanter` are needed once per new shell session.
 
 ## 1. Install
 
@@ -75,7 +93,7 @@ symlink) your runs under `$VH2_ROOT/runs/`.
 # (wrangle_pilon, merge_checkv_blastn, wrangle_kraken) execute in THIS
 # env, so it also needs pandas / numpy / pyfastx / pyarrow.
 mamba create -n virushanter -c conda-forge -c bioconda \
-  'snakemake-minimal=9.23.*' 'pandas>=3' 'numpy>=1.24' 'pyfastx>=2.0' 'pyarrow>=14'
+  'snakemake-minimal=9.23.*' 'pandas>=3' 'numpy>=2.5.0' 'pyfastx>=2.3.1' 'pyarrow>=24.0.0'
 conda activate virushanter
 
 cd "$VH2_ROOT/code"
@@ -85,7 +103,8 @@ cd virusHanter2
 
 Every per-tool step uses its own conda env from `envs/*.yaml` via
 `--sdm conda` (created on first use). reportHanter is installed by its
-rule env at the pinned `@v0.9.0` tag; nothing to install by hand.
+rule env at the tag pinned in `envs/reporthanter.yaml`; nothing to
+install by hand.
 
 ## 2. Build the NCBI-virus databases (BLAST + Kaiju + Kraken2 + parquet + taxdump)
 
@@ -132,14 +151,19 @@ conda run -n bwa bwa index -p human_gencode GRCh38.primary_assembly.genome.fa  #
 # HUMAN_INDEX = $REF/human/human_gencode   (the prefix, not the .fa)
 ```
 
-CheckV (`CHECKV_DB`):
+CheckV (`CHECKV_DB`). Let CheckV fetch the database version it expects,
+so the tool and database always match:
 
 ```bash
-mkdir -p "$REF/checkv" && cd "$REF/checkv"
-wget https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz
-tar -xzf checkv-db-v1.5.tar.gz
+mkdir -p "$REF/checkv"
+mamba create -n checkv -c conda-forge -c bioconda 'checkv>=1.1.1'
+conda run -n checkv checkv download_database "$REF/checkv"
+# produces $REF/checkv/checkv-db-vX.Y (currently checkv-db-v1.5)
 # CHECKV_DB = $REF/checkv/checkv-db-v1.5
 ```
+
+(Or download the tarball directly:
+`curl -LO https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz && tar -xzf checkv-db-v1.5.tar.gz`.)
 
 ## 4. Configure the main pipeline
 
@@ -160,6 +184,18 @@ off; `HOST_REMOVAL: bwa`.
 gets its own results subdirectory and its own `run_information_<run>.csv`
 and `per_virus_<run>.csv`. Override `SAMPLES` per invocation.
 
+Each run folder holds only that run's paired FASTQs. For example:
+
+```
+$VH2_ROOT/runs/run01/
+  sampleA_R1_001.fastq.gz  sampleA_R2_001.fastq.gz
+  sampleB_R1_001.fastq.gz  sampleB_R2_001.fastq.gz
+```
+
+Copy or symlink your FASTQs in (`ln -s /path/to/*.fastq.gz "$VH2_ROOT/runs/run01/"`).
+Files must be an even count with R1/R2 pairs; an odd count raises a clear
+error.
+
 ```bash
 conda activate virushanter
 cd "$VH2_ROOT/code/virusHanter2"
@@ -168,8 +204,9 @@ cd "$VH2_ROOT/code/virusHanter2"
 snakemake -n --sdm conda --configfile config/config.local.yaml \
   --config SAMPLES="$VH2_ROOT/runs/run01"
 
-# Process every run folder. The first invocation also builds the per-rule
-# conda envs (slower); later runs reuse them.
+# Process every run folder. The FIRST invocation materialises the ~18
+# per-rule conda envs from envs/*.yaml (needs internet, can take
+# 30-60 min and a few GB under .snakemake/conda/); later runs reuse them.
 for run in "$VH2_ROOT"/runs/*/; do
   echo ">>> $run"
   snakemake --sdm conda --cores 16 \
@@ -181,7 +218,10 @@ done
 
 Each run produces, under `$VH2_ROOT/results/<run>/`: per-sample HTML
 reports, `run_information_<run>.csv`, `per_virus_<run>.csv`, mosdepth
-summaries, and a batch `multiqc_report.html`. If a run is interrupted:
+summaries, a batch `multiqc_report.html`, and a provenance record
+(`software_versions.tsv` and `run_provenance_<run>.json`) capturing the
+reference database and tool versions that produced the run. If a run is
+interrupted:
 `snakemake --unlock --configfile config/config.local.yaml --config SAMPLES=<run>`
 then re-run it.
 

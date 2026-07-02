@@ -2,8 +2,8 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  # CheckV 1.1+ is the current release. Confirm the installed CheckV
-  # database (config CHECKV_DB) is a version CheckV 1.1 accepts before a
-  # production run; older databases may need refreshing with
-  # `checkv download_database`.
+  # CheckV 1.1+ is the current release; it uses the current CheckV
+  # database, checkv-db-v1.5. `checkv download_database <dir>` always
+  # fetches the version matching the installed CheckV, so prefer it over
+  # a hardcoded tarball URL when setting up CHECKV_DB.
   - checkv>=1.1.1
