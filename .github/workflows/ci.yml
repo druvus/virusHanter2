@@ -22,10 +22,10 @@ jobs:
           # merge_checkv_blastn) execute in this driver env (Snakemake
           # ignores conda: on run: blocks), so it needs pandas/numpy/
           # pyfastx AND pyarrow (merge_checkv_blastn reads the parquet).
-          pip install "snakemake==9.23.*" pandas numpy pyfastx pyarrow
+          pip install "snakemake==9.23.*" "pandas>=3" numpy pyfastx pyarrow
           # Pin to the released tag (matches envs/reporthanter.yaml) so CI
           # and production materialise the same reportHanter code.
-          pip install git+https://github.com/druvus/reporthanter.git@v0.10.1
+          pip install git+https://github.com/druvus/reporthanter.git@v0.10.2
 
       - name: snakemake --lint (advisory; style warnings only)
         run: snakemake --lint --configfile test/config.test.yaml || true
@@ -55,7 +55,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pandas numpy pyarrow pyfastx pytest
+          pip install "pandas>=3" numpy pyarrow pyfastx pytest
 
       - name: Run pytest suite
         run: pytest tests/ -v --tb=short
