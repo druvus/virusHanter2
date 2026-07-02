@@ -2,4 +2,4 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - kraken2>=2.1
+  - kraken2>=2.17.1

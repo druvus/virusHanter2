@@ -2,9 +2,9 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - hostile>=2
-  - minimap2>=2.26
-  - samtools>=1.18
+  - hostile>=2.0.2
+  - minimap2>=2.31
+  - samtools>=1.23.1
   # Explicit: the hostile_human rule reformats hostile's JSON stats with
   # an inline `python -c`. hostile pulls Python transitively, but declare
   # it so the env does not depend on that staying true.
