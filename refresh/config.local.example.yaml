@@ -31,6 +31,6 @@ KRAKEN_DB_FOR_COMPARE: "/data/refdbs/virus_ref/kraken2_refseq_viral"
 
 # Source URLs default to the canonical NCBI FTP paths; override only to
 # pin a specific snapshot. BLAST tarball set also has a sensible default.
-# BLAST_NAMES: ["ref_viruses_rep_genomes", "taxdb"]
+# BLAST_NAMES: ["ref_viruses_rep_genomes", "mito", "taxdb"]
 
 # End of config.local.example.yaml
