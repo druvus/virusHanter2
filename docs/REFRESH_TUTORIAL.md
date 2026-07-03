@@ -71,9 +71,9 @@ snakemake -s refresh/refresh_virus_parquet.smk \
 `refresh/config.local.yaml` carries four key paths:
 
 ```yaml
-OUTPUT_PARQUET: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
-DOWNLOAD_DIR:   "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/_refresh_workdir"
-KRAKEN_DB_FOR_COMPARE: "$VH2_ROOT/ref_dbs/KRAKEN_DB/k2_viral_20260226"
+OUTPUT_PARQUET: "$VH2_ROOT/refdbs/virus_ref/all_viruses.parquet"
+DOWNLOAD_DIR:   "$VH2_ROOT/refdbs/virus_ref/_refresh_workdir"
+KRAKEN_DB_FOR_COMPARE: "$VH2_ROOT/refdbs/virus_ref/kraken2_refseq_viral"
 # Source URLs default to the canonical NCBI FTP paths; override
 # only when you want a pinned snapshot.
 ```
@@ -130,7 +130,7 @@ sequence is:
    itself as a regression check.
 8. **Refresh the BLAST viral DB tarballs** via
    `update_blastdb.pl` (BLAST+ ships the script). Fetches
-   `ref_viruses_rep_genomes`, `mito_rna_db` and `taxdb` from
+   `ref_viruses_rep_genomes`, `mito` and `taxdb` from
    NCBI's pre-built tarballs into a sibling directory next to the
    parquet (`blast_refseq_viral/`), writes a `viral_rna_mito.nal`
    alias so the main pipeline's `BLASTN_DB` points at a single
@@ -146,7 +146,7 @@ sequence is:
 After a successful refresh the parquet's directory looks like:
 
 ```
-$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
+$VH2_ROOT/refdbs/virus_ref/
 ├── all_viruses.parquet               (~250 MB)
 ├── all_viruses_build_stats.json
 ├── all_viruses_vs_kraken2.tsv        (one row per tax_id; ~1 MB)
@@ -164,7 +164,7 @@ $VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
 └── blast_refseq_viral/
     ├── viral_rna_mito.nal             (the alias the main pipeline points at)
     ├── ref_viruses_rep_genomes.*      (BLAST index files from NCBI's tarball)
-    ├── mito_rna_db.*                  (BLAST index files from NCBI's tarball)
+    ├── mito.*                  (BLAST index files from NCBI's tarball)
     ├── taxdb.bti, taxdb.btd           (BLAST taxonomy lookup)
     └── snapshot.tsv                   (one row per tarball: name + fetch UTC)
 ```
@@ -190,11 +190,11 @@ $VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/
 Update your run config (e.g. `config/config.local.yaml`):
 
 ```yaml
-VIRUS_PARQUET: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/all_viruses.parquet"
-TAXDUMP_NODES: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/nodes.dmp"
-KAIJU_DB:      "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kaiju_refseq_viral"
-KRAKEN_DB:     "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/kraken2_refseq_viral"
-BLASTN_DB:     "$VH2_ROOT/ref_dbs/BLAST_DB/blast_db/viral_rna_mito"
+VIRUS_PARQUET: "$VH2_ROOT/refdbs/virus_ref/all_viruses.parquet"
+TAXDUMP_NODES: "$VH2_ROOT/refdbs/virus_ref/nodes.dmp"
+KAIJU_DB:      "$VH2_ROOT/refdbs/virus_ref/kaiju_refseq_viral"
+KRAKEN_DB:     "$VH2_ROOT/refdbs/virus_ref/kraken2_refseq_viral"
+BLASTN_DB:     "$VH2_ROOT/refdbs/virus_ref/blast_refseq_viral/viral_rna_mito"
 ```
 
 Force `bwa_align_to_kraken_hits` and `kaiju` to re-run on the
@@ -211,7 +211,7 @@ snakemake --sdm conda --cores 4 \
 
 The `refresh_blast` rule drives `update_blastdb.pl` against
 NCBI's pre-built tarballs (`ref_viruses_rep_genomes`,
-`mito_rna_db`, `taxdb`) and publishes them next to the parquet
+`mito`, `taxdb`) and publishes them next to the parquet
 under `blast_refseq_viral/`, with a generated
 `viral_rna_mito.nal` alias the main pipeline's `BLASTN_DB`
 points at. The rule also writes a `snapshot.tsv` manifest so
@@ -222,14 +222,14 @@ Override the default DB list in `refresh/config.local.yaml` if
 your local install uses a different alias mix:
 
 ```yaml
-BLAST_NAMES: ["ref_viruses_rep_genomes", "mito_rna_db", "taxdb"]
-BLAST_PUBLISH_DIR: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
+BLAST_NAMES: ["ref_viruses_rep_genomes", "mito", "taxdb"]
+BLAST_PUBLISH_DIR: "$VH2_ROOT/refdbs/virus_ref/blast_refseq_viral"
 ```
 
 After the refresh, point the main pipeline at the new alias:
 
 ```yaml
-BLASTN_DB: "$VH2_ROOT/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral/viral_rna_mito"
+BLASTN_DB: "$VH2_ROOT/refdbs/virus_ref/blast_refseq_viral/viral_rna_mito"
 ```
 
 ## Troubleshooting
