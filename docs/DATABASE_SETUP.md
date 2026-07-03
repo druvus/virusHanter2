@@ -10,6 +10,15 @@ config keys, see [CONFIGURATION.md](CONFIGURATION.md).
 For per-database disk paths used in production, see
 [REFERENCE_DBS.md](REFERENCE_DBS.md).
 
+> **Layout note.** The `/path/to/<TOOL>_DB/...` examples here describe
+> obtaining each database individually (the production per-tool layout).
+> For a fresh viral-only deploy, the refresh workflow builds the viral
+> classifier DBs together under `$VH2_ROOT/refdbs/virus_ref/`
+> (`all_viruses.parquet`, `nodes.dmp`, `kaiju_refseq_viral/`,
+> `kraken2_refseq_viral/`, `blast_refseq_viral/`), with `human/` and
+> `checkv/` alongside -- see [DEPLOY_LINUX.md](DEPLOY_LINUX.md) and
+> [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md). Use one layout consistently.
+
 ---
 
 ## Resource requirements at a glance

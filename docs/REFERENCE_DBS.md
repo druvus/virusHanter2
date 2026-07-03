@@ -1,5 +1,16 @@
 # Reference databases
 
+> **Two layouts.** This document describes the **production** layout:
+> per-tool directories under `$VH2_ROOT/ref_dbs/`, using the larger
+> bacterial+viral `pluspf` / `refseq` classifier databases, matching
+> `config/config.production.yaml`. A **fresh viral-only deploy** instead
+> uses the refresh workflow's coordinated snapshot at
+> `$VH2_ROOT/refdbs/virus_ref/` (all viral classifier DBs together) plus
+> `refdbs/human/` and `refdbs/checkv/` -- that is what
+> [DEPLOY_LINUX.md](DEPLOY_LINUX.md), [REFRESH_TUTORIAL.md](REFRESH_TUTORIAL.md)
+> and `config/config.local.example.yaml` use. Pick one; the paths below
+> are the production variant.
+
 The pipeline consumes several reference databases. Paths below use
 `$VH2_ROOT` as the deployment base (see
 [DEPLOY_LINUX.md](DEPLOY_LINUX.md)); substitute your own. They live
