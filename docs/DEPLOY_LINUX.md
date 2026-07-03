@@ -145,9 +145,9 @@ Human BWA index (`HUMAN_INDEX`):
 ```bash
 mkdir -p "$REF/human" && cd "$REF/human"
 wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_50/GRCh38.primary_assembly.genome.fa.gz
-gunzip GRCh38.primary_assembly.genome.fa.gz
+
 mamba create -n bwa -c bioconda -c conda-forge 'bwa>=0.7.17'
-conda run -n bwa bwa index -p human_gencode GRCh38.primary_assembly.genome.fa  # ~1.5 h, ~14 GB
+conda run -n bwa bwa index -p human_gencode GRCh38.primary_assembly.genome.fa.gz  # ~1.5 h, ~14 GB
 # HUMAN_INDEX = $REF/human/human_gencode   (the prefix, not the .fa)
 ```
 
