@@ -134,9 +134,37 @@ $REF/virus_ref/
 ```
 
 These Kraken2 / Kaiju DBs are viral-scoped: coordinated and light, ideal
-for viral metagenomics. If you later need bacterial/fungal context, point
-`KRAKEN_DB` at a pre-built `pluspf` instead (see DATABASE_SETUP.md); not
-required for viral detection.
+for viral metagenomics and small enough for a laptop.
+
+### Using pre-built Kraken2 `pluspf` instead (recommended for a server)
+
+On a host with enough RAM you can swap the viral-only Kraken2 DB for the
+pre-built `pluspf` snapshot (bacteria + archaea + viral + fungi +
+protozoa + human), which is what the production config uses. Keep the
+refresh-built Kaiju / BLAST / parquet; change only:
+
+```yaml
+KRAKEN_DB: "$REF/kraken2/k2_pluspf_20260226"   # extracted pluspf dir
+```
+
+Download it from `https://genome-idx.s3.amazonaws.com/kraken/` and
+extract (see [DATABASE_SETUP.md](DATABASE_SETUP.md)). No code change is
+needed -- `wrangle_kraken` anchors the `Viruses` domain at `tax_lvl "D"`
+(pluspf) or `"R1"` (viral-only), so both shapes work.
+
+Trade-offs:
+
+- **RAM:** `pluspf` needs ~96 GB RAM at the `kraken` step (~82 GB hash);
+  the viral-only DB needs only a few GB. Size the node accordingly.
+- **Coordination:** `pluspf` is a separate snapshot, so its taxid
+  universe will not match the refresh-built parquet / Kaiju / BLAST
+  exactly. The pipeline absorbs this (rank filter, genus walk-up, an
+  `unmapped_taxids.tsv` sidecar); you may see a cosmetic
+  `databases span N days` provenance warning if the build dates diverge.
+- **Upside:** `kraken_virus_percent` becomes viral reads as a fraction
+  of *all* reads (not just of a tiny viral index), host / bacterial
+  reads get classified for context, and viral coverage is generally more
+  complete than the small `k2_viral_*` snapshots.
 
 ## 3. The two databases the refresh does not build
 
