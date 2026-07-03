@@ -27,7 +27,7 @@ KRAKEN_DB_FOR_COMPARE: "/data/ref_dbs/KRAKEN_DB/k2_viral_20260226"
 # `BLAST_NAMES` if you maintain a different alias mix locally.
 # `BLAST_PUBLISH_DIR` defaults to a sibling directory next to the
 # parquet so all four classifier DBs share a coordinated snapshot.
-# BLAST_NAMES:       ["ref_viruses_rep_genomes", "taxdb"]
+# BLAST_NAMES:       ["ref_viruses_rep_genomes", "mito", "taxdb"]
 # BLAST_PUBLISH_DIR: "/data/ref_dbs/INDIVIDUAL_VIRUS_FASTA/blast_refseq_viral"
 
 # Source URLs. Override if you want a different snapshot. The

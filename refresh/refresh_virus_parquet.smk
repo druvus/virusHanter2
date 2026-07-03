@@ -60,16 +60,19 @@ KRAKEN_DB_FOR_COMPARE = config.get("KRAKEN_DB_FOR_COMPARE", "")
 
 # NCBI's pre-built BLAST DB tarballs the pipeline consumes. Default to
 # ref_viruses_rep_genomes (viral RefSeq reference genomes, matches the
-# parquet's source) plus taxdb (BLAST's own taxid lookup files). Every
-# name here must be a database `update_blastdb.pl` can fetch; a name
-# NCBI does not publish makes update_blastdb.pl exit non-zero and the
-# rule fail. To add mitochondrial / rRNA references, append a currently
-# available NCBI DB (check `update_blastdb.pl --showall`); the alias
-# below picks up whatever is listed here (minus taxdb).
+# parquet's source), mito (RefSeq mitochondrion, so host mitochondrial
+# contigs get labelled rather than mistaken for viral -- the "mito" half
+# of the `viral_rna_mito` alias) and taxdb (BLAST's own taxid lookup
+# files). Every name here must be a database `update_blastdb.pl` can
+# fetch; a name NCBI does not publish makes update_blastdb.pl exit
+# non-zero and the rule fail. To add rRNA references, append a currently
+# available NCBI DB (check `update_blastdb.pl --showall`, e.g.
+# SSU_eukaryote_rRNA); the alias below picks up whatever is listed here
+# (minus taxdb).
 BLAST_NAMES = list(
     config.get(
         "BLAST_NAMES",
-        ["ref_viruses_rep_genomes", "taxdb"],
+        ["ref_viruses_rep_genomes", "mito", "taxdb"],
     )
 )
 
@@ -651,7 +654,7 @@ rule compare_with_kraken2:
 #
 # Drives `update_blastdb.pl` to fetch the pre-built NCBI BLAST
 # tarballs the main pipeline's BLASTN_DB consumes (by default
-# `ref_viruses_rep_genomes` + `taxdb`) and a small manifest
+# `ref_viruses_rep_genomes` + `mito` + `taxdb`) and a small manifest
 # (`snapshot.tsv`) that records each tarball's MD5 + size + fetch
 # date. The result is a directory layout the main pipeline can point
 # at via:
