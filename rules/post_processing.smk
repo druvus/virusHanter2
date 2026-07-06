@@ -363,9 +363,17 @@ rule multiqc:
     conda:
         "../envs/multiqc.yaml"
     shell:
+        # Exclude MultiQC's kaiju module: the pipeline's Kaiju table is
+        # enriched (ICTV-canonicalised taxon_name plus an aliases column
+        # when TAXDUMP_NODES is set), so it carries more columns than the
+        # vanilla kaiju2table format MultiQC's parser expects, which makes
+        # that module raise and MultiQC exit non-zero. Kaiju is already a
+        # section in each per-sample reportHanter report, so the MultiQC
+        # kaiju view is redundant.
         """
         multiqc \
             --force \
+            --exclude kaiju \
             --outdir {params.results_folder} \
             --filename multiqc_report.html \
             {params.results_folder} \
