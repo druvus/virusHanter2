@@ -205,12 +205,25 @@ rule quast_per_assembler:
         "../envs/quast.yaml"
     shell:
         """
-        quast.py \
+        LABEL="{wildcards.sample}_{wildcards.assembler}"
+        if quast.py \
             --threads {threads} \
             --output-dir {output.report_dir} \
-            --labels {wildcards.sample}_{wildcards.assembler} \
+            --labels "$LABEL" \
             {input.contigs} \
-            > {log} 2>&1
+            > {log} 2>&1; then
+            :
+        else
+            # QUAST exits non-zero when the assembly has no contigs at or
+            # above its minimum length -- a dummy / failed / low-yield
+            # assembly (which the pipeline handles everywhere else via the
+            # dummy-contig sentinel). Emit a minimal, valid report so this
+            # optional QC step does not fail the whole batch.
+            echo "[quast] no analysable contigs; writing an empty report" >> {log}
+            mkdir -p {output.report_dir}
+            printf 'Assembly\t%s\n# contigs\t0\nLargest contig\t0\nTotal length\t0\nN50\t0\n' \
+                "$LABEL" > {output.report_tsv}
+        fi
         """
 
 
