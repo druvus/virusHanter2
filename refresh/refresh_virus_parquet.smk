@@ -696,16 +696,27 @@ rule refresh_blast:
         update_blastdb.pl --decompress {params.names} \\
             > {log} 2>&1
 
-        # Move the decompressed DB files into the publish dir so
-        # the parquet's directory carries the coordinated snapshot.
-        # `mv -f` overwrites any older copies left from a previous
-        # refresh.
-        for ext in nsq nhr nin nog nsd nsi ntf nto ndb njs not nhd nhi; do
-            for src in {params.download_dir}/*.${{ext}}; do
-                [ -e "$src" ] || continue
-                mv -f "$src" {params.publish_dir}/ 2>>{log}
-            done
+        # Publish each downloaded DB into the parquet's directory so it
+        # carries the coordinated snapshot. If a DB was freshly
+        # decompressed in the workdir, replace its published copy
+        # WHOLESALE -- clear the old files first, then move the fresh set
+        # in -- so an interrupted or re-run refresh cannot leave a
+        # mixed-vintage index set. A stale index file lingering next to a
+        # newer sequence file makes blastn fail at run time with
+        # "Error pre-fetching sequence data". A DB that update_blastdb.pl
+        # left untouched (already current) has no fresh files here, so its
+        # published copy is kept. The `.n*` glob matches the BLAST index
+        # files but not the `.tar.gz` tarball, which stays in the workdir
+        # so the next run's up-to-date check still works.
+        shopt -s nullglob
+        for name in {params.names}; do
+            fresh=( {params.download_dir}/${{name}}.n* )
+            if [ ${{#fresh[@]}} -gt 0 ]; then
+                rm -f {params.publish_dir}/${{name}}.n* 2>>{log}
+                mv -f "${{fresh[@]}}" {params.publish_dir}/ 2>>{log}
+            fi
         done
+        shopt -u nullglob
         # taxdb files have their own naming (taxdb.bti, taxdb.btd).
         for src in {params.download_dir}/taxdb.*; do
             [ -e "$src" ] || continue
