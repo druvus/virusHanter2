@@ -99,3 +99,22 @@ def test_leading_schema_order_is_stable(tmp_path: Path) -> None:
     out = _run([a], tmp_path / "batch.csv")
 
     assert list(out.columns)[: len(LEADING)] == LEADING
+
+
+def test_headerless_empty_sample_is_skipped(tmp_path: Path) -> None:
+    """A sample whose Kraken report had zero viral hits writes an empty
+    frame with no header row -- a non-zero-byte, zero-column file. It
+    must be tolerated (skipped), not raise EmptyDataError."""
+    good = tmp_path / "per_virus_s1.csv"
+    pd.DataFrame([_sample_row("s1", 42.0)]).to_csv(good, index=False)
+
+    empty = tmp_path / "per_virus_s2.csv"
+    # Reproduce exactly what per_virus_metrics writes for an empty frame:
+    # pd.DataFrame([]).to_csv(index=False) yields a single blank line.
+    pd.DataFrame([]).to_csv(empty, index=False)
+    assert empty.stat().st_size > 0  # the size guard would not catch it
+
+    out = _run([good, empty], tmp_path / "batch.csv")
+
+    assert list(out["sample_name"]) == ["s1"]
+    assert list(out.columns)[: len(LEADING)] == LEADING
