@@ -57,7 +57,14 @@ def main() -> None:
     for path in args.inputs:
         if not path.exists() or path.stat().st_size == 0:
             continue
-        frames.append(pd.read_csv(path))
+        try:
+            frames.append(pd.read_csv(path))
+        except pd.errors.EmptyDataError:
+            # A sample whose Kraken report had zero viral hits writes an
+            # empty frame with no header row, which is a non-zero-byte
+            # file the size guard above does not catch. Treat it like an
+            # empty input; the canonical schema is restored below.
+            continue
     if frames:
         df = pd.concat(frames, ignore_index=True)
         # Reindex to the canonical column order so the batch file has a
