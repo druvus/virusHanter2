@@ -336,19 +336,28 @@ rule checkv:
     conda:
         "../envs/checkv.yaml"
     shell:
-        # Known issue on macOS (both osx-64 via Rosetta and native osx-arm64):
-        # CheckV 1.0.3's `search_hmms` reports "80 hmmsearch tasks failed"
-        # even when every .hmmout file ends with the `# [ok]` marker, because
-        # sp.Popen(cmd, shell=True).wait() returns non-zero in that
-        # multiprocessing.Pool worker context. The bug is independent of the
-        # number of threads (also fails at -t 1) and the hmmer build, and
-        # there is no newer CheckV release on bioconda. Production / Phase 6
-        # parity runs must use Linux.
+        # CheckV aborts with "N hmmsearch tasks failed" whenever gene
+        # prediction yields no proteins, because search_hmms still spawns
+        # one hmmsearch task per database split and every task exits
+        # non-zero with an empty query. This happens in two situations we
+        # must not let fail the whole batch:
+        #   1. A dummy-only assembly (the pipeline writes a single 200 bp
+        #      synthetic DUMMY_CONTIG when an assembler produced nothing);
+        #      prodigal finds no genes in it.
+        #   2. A real but low-complexity assembly whose contigs carry no
+        #      predicted ORFs (proteins.faa empty).
+        # In both cases the honest result is zero viral/host genes, so we
+        # synthesise the minimal contamination table the downstream merge
+        # and dummy-contig sentinel expect (contig_id + the four
+        # gene/provirus columns) instead. Any OTHER CheckV failure leaves
+        # proteins.faa non-empty (genes were called but, e.g., the HMM
+        # database is missing or corrupt, or the run ran out of memory)
+        # and must fail loudly rather than silently blanking the sample.
         #
-        # A second macOS issue: external volumes formatted as HFS+ or APFS
-        # write AppleDouble '._*.hmm' metadata files alongside every real
-        # HMM. CheckV mis-reads these as HMMs and fails with "N hmmsearch
-        # tasks failed". They are silently removed here on Darwin before
+        # A macOS-specific variant of case 2: external volumes formatted
+        # as HFS+ or APFS write AppleDouble '._*.hmm' metadata files
+        # alongside every real HMM; CheckV mis-reads these as HMMs and
+        # fails the same way. They are removed here on Darwin before
         # CheckV runs; on Linux the block is a no-op.
         """
         if [ "$(uname)" = "Darwin" ]; then
@@ -357,33 +366,50 @@ rule checkv:
 
         mkdir -p {params.folder}
 
-        # When an assembler produced nothing the pipeline writes a single
-        # synthetic DUMMY_CONTIG. CheckV cannot process it: prodigal finds
-        # no genes in the 200 bp synthetic sequence, so the hmmsearch step
-        # aborts with "N hmmsearch tasks failed" and no contamination.tsv
-        # is written, failing the whole batch. If the input is only dummy
-        # contigs, synthesise the minimal contamination table the
-        # downstream dummy-contig sentinel expects (contig_id + the four
-        # gene/provirus columns merge_checkv_blastn reads) instead of
-        # running CheckV; otherwise run CheckV as normal.
         TOTAL=$(grep -c '^>' {input.contigs} || true)
         DUMMY=$(grep -c '^>DUMMY_CONTIG' {input.contigs} || true)
-        if [ "${{TOTAL:-0}}" -gt "${{DUMMY:-0}}" ]; then
+
+        SYNTHESISE=0
+        if [ "${{TOTAL:-0}}" -le "${{DUMMY:-0}}" ]; then
+            echo "[checkv] dummy-only assembly; writing an empty contamination table" > {log}
+            SYNTHESISE=1
+        else
+            # Run CheckV, capturing its exit code rather than aborting under
+            # set -e so a benign "no genes predicted" failure can be handled.
+            set +e
             checkv contamination \
                 -d {params.db} \
                 {input.contigs} \
                 {params.folder} \
                 -t {threads} \
                 2> {log}
+            RC=$?
+            set -e
+            if [ "$RC" -eq 0 ]; then
+                mv {params.folder}/contamination.tsv {output.checkv}
+                # Drop CheckV intermediates; keep the contamination TSV only.
+                # Log a warning rather than failing if a file cannot be removed.
+                ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
+                    | xargs -r rm -rf \
+                    || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
+            else
+                # CheckV failed. Tolerate ONLY the no-genes case: prodigal
+                # predicted no ORFs, so proteins.faa is empty (or absent).
+                GENES=0
+                if [ -f {params.folder}/tmp/proteins.faa ]; then
+                    GENES=$(grep -c '^>' {params.folder}/tmp/proteins.faa || true)
+                fi
+                if [ "${{GENES:-0}}" -gt 0 ]; then
+                    echo "[checkv] CheckV failed (exit $RC) with ${{GENES}} predicted genes; this is not the benign no-genes case. See the log below." >&2
+                    cat {log} >&2
+                    exit 1
+                fi
+                echo "[checkv] prodigal predicted no genes; hmmsearch has no query and CheckV aborts. Synthesising an empty contamination table." >> {log}
+                SYNTHESISE=1
+            fi
+        fi
 
-            mv {params.folder}/contamination.tsv {output.checkv}
-            # Drop CheckV intermediates; keep the contamination TSV only.
-            # Log a warning rather than failing if any file cannot be removed.
-            ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
-                | xargs -r rm -rf \
-                || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
-        else
-            echo "[checkv] dummy-only assembly; writing an empty contamination table" > {log}
+        if [ "$SYNTHESISE" -eq 1 ]; then
             rm -rf {params.folder}/tmp 2>/dev/null || true
             printf 'contig_id\ttotal_genes\tviral_genes\thost_genes\tprovirus\n' > {output.checkv}
             grep '^>' {input.contigs} 2>/dev/null | sed 's/^>//; s/[[:space:]].*//' \
