@@ -355,19 +355,42 @@ rule checkv:
             find {params.db} -name "._*" -delete 2>/dev/null || true
         fi
 
-        checkv contamination \
-            -d {params.db} \
-            {input.contigs} \
-            {params.folder} \
-            -t {threads} \
-            2> {log}
+        mkdir -p {params.folder}
 
-        mv {params.folder}/contamination.tsv {output.checkv}
-        # Drop CheckV intermediates; keep the contamination TSV only.
-        # Log a warning rather than failing if any file cannot be removed.
-        ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
-            | xargs -r rm -rf \
-            || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
+        # When an assembler produced nothing the pipeline writes a single
+        # synthetic DUMMY_CONTIG. CheckV cannot process it: prodigal finds
+        # no genes in the 200 bp synthetic sequence, so the hmmsearch step
+        # aborts with "N hmmsearch tasks failed" and no contamination.tsv
+        # is written, failing the whole batch. If the input is only dummy
+        # contigs, synthesise the minimal contamination table the
+        # downstream dummy-contig sentinel expects (contig_id + the four
+        # gene/provirus columns merge_checkv_blastn reads) instead of
+        # running CheckV; otherwise run CheckV as normal.
+        TOTAL=$(grep -c '^>' {input.contigs} || true)
+        DUMMY=$(grep -c '^>DUMMY_CONTIG' {input.contigs} || true)
+        if [ "${{TOTAL:-0}}" -gt "${{DUMMY:-0}}" ]; then
+            checkv contamination \
+                -d {params.db} \
+                {input.contigs} \
+                {params.folder} \
+                -t {threads} \
+                2> {log}
+
+            mv {params.folder}/contamination.tsv {output.checkv}
+            # Drop CheckV intermediates; keep the contamination TSV only.
+            # Log a warning rather than failing if any file cannot be removed.
+            ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
+                | xargs -r rm -rf \
+                || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
+        else
+            echo "[checkv] dummy-only assembly; writing an empty contamination table" > {log}
+            rm -rf {params.folder}/tmp 2>/dev/null || true
+            printf 'contig_id\ttotal_genes\tviral_genes\thost_genes\tprovirus\n' > {output.checkv}
+            grep '^>' {input.contigs} 2>/dev/null | sed 's/^>//; s/[[:space:]].*//' \
+                | while IFS= read -r cid; do
+                    printf '%s\t0\t0\t0\tNo\n' "$cid"
+                done >> {output.checkv} || true
+        fi
         """
 
 
