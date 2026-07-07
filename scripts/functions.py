@@ -823,7 +823,18 @@ def run_blastn(contigs_csv: str, db: str, temp_file: str, threads: int) -> pd.Da
         command = [
             "blastn", "-num_threads", str(threads), "-task", "megablast",
             "-query", temp_file, "-db", db, "-max_target_seqs", "1",
-            "-outfmt", "6 stitle sacc pident slen",
+            # `sseqid` (subject seq-id, read from the index) rather than
+            # `sacc` (subject accession, resolved from the fetched
+            # subject). NCBI's ref_viruses_rep_genomes contains a
+            # malformed subject that -max_target_seqs 1 megablast latches
+            # onto with a phantom 0-identity hit; blast then cannot
+            # pre-fetch its data and CRASHES (exit 255) inside the
+            # accession printer x_PrintSubjectAccession. `sseqid` does not
+            # touch the fetched subject, so it prints "Unknown" for that
+            # entry and finishes cleanly. For real v5 subjects sseqid is
+            # the accession.version, which downstream handles the same as
+            # the old accession (it strips the version for parquet lookup).
+            "-outfmt", "6 stitle sseqid pident slen",
         ]
         # capture_output so a non-zero blastn includes stderr in the raised
         # CalledProcessError rather than printing to the main process stdout.
@@ -843,4 +854,10 @@ def run_blastn(contigs_csv: str, db: str, temp_file: str, threads: int) -> pd.Da
         df.matches.str.split("\t", expand=True).iloc[:, :4]
     )
     df = df.assign(sequence_len=lambda x: x.sequence_len.str.split("\n").str[0])
+    # Drop blastn's placeholder row for a subject it could not resolve
+    # (sseqid == "Unknown"): that is the malformed ref_viruses_rep_genomes
+    # entry described above, reported as a phantom 0-identity hit rather
+    # than a real match. Contigs whose only hit was that phantom simply
+    # fall out of the BLAST table.
+    df = df.loc[df.accession != "Unknown"]
     return df
