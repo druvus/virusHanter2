@@ -653,6 +653,7 @@ def common_suffix(folder: str) -> str:
         file.name
         for file in Path(folder).iterdir()
         if re.search(r"\.(fq|fastq|fa|fasta|fna)(\.gz)?$", file.name)
+        and not file.name.startswith(".")
     )
     if not samples:
         return ""
@@ -679,10 +680,17 @@ def paired_reads(folder: str) -> list:
             out += ca
         return out
 
+    # Skip dot-prefixed files: macOS copies AppleDouble '._<name>'
+    # resource-fork shadows alongside every real FASTQ on HFS+/APFS/SMB
+    # volumes. They match the extension regex, so without this guard the
+    # '._<sample>R1_001.fastq.gz' shadows pair up into a phantom
+    # '._<sample>' sample that fastp then rejects as a corrupt gzip. No
+    # real sample name begins with a dot.
     samples = sorted(
         x.stem
         for x in Path(folder).iterdir()
         if re.search(r"\.(fq|fastq|fa|fasta|fna)(\.gz)?$", x.name)
+        and not x.name.startswith(".")
     )
 
     if len(samples) % 2 != 0:
