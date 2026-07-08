@@ -130,6 +130,22 @@ def test_helpers_skip_non_fastq_files(tmp_path):
     assert common_suffix(str(tmp_path)) == ".fastq.gz"
 
 
+def test_helpers_skip_appledouble_shadows(tmp_path):
+    # macOS copies AppleDouble '._<name>' resource-fork shadows next to
+    # every real FASTQ on HFS+/APFS/SMB volumes. They match the FASTQ
+    # extension regex, so without the dot-prefix guard the shadows pair
+    # up into a phantom '._a_R' sample that fastp rejects as a corrupt
+    # gzip.
+    _touch_all(tmp_path, [
+        "a_R1_001.fastq.gz",
+        "a_R2_001.fastq.gz",
+        "._a_R1_001.fastq.gz",
+        "._a_R2_001.fastq.gz",
+    ])
+    assert paired_reads(str(tmp_path)) == ["a_R"]
+    assert common_suffix(str(tmp_path)) == "_001.fastq.gz"
+
+
 # ---------------------------------------------------------------------------
 # wrangle_kraken: D / R1 anchor coverage
 #
