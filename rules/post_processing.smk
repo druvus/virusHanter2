@@ -263,6 +263,13 @@ rule per_virus_metrics:
             if hasattr(input, "genomad_summaries")
             else ""
         ),
+        # Species-level matching of Kraken rows to references, contigs
+        # and Kaiju hits; empty when TAXDUMP_NODES is not configured.
+        taxdump_args=(
+            f"--taxdump-nodes {config['TAXDUMP_NODES']}"
+            if config.get("TAXDUMP_NODES")
+            else ""
+        ),
     resources:
         mem_mb=4000,
         runtime=30,
@@ -285,6 +292,7 @@ rule per_virus_metrics:
             --virus-parquet {input.virus_parquet} \
             --top-n {params.top_n} \
             {params.genomad_args} \
+            {params.taxdump_args} \
             --out {output.per_virus_csv} \
             > {log} 2>&1
         """
@@ -352,7 +360,8 @@ rule multiqc:
         ),
     output:
         html=f"{RESULT_FOLDER}/multiqc_report.html",
-        data=directory(f"{RESULT_FOLDER}/multiqc_data"),
+        # MultiQC names the data directory after --filename (<stem>_data).
+        data=directory(f"{RESULT_FOLDER}/multiqc_report_data"),
     params:
         results_folder=RESULT_FOLDER,
     resources:

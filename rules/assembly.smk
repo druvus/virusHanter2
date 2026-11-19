@@ -240,6 +240,7 @@ rule pilon:
         index_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/bwa",
         pilon_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON",
         pilon_mem=PILON_MEM,
+        min_len=CONTIG_LENGTH,
     threads: THREADS
     resources:
         # PILON_MEM_MB is derived from PILON_MEM at workflow-parse time so the
@@ -260,11 +261,44 @@ rule pilon:
             | samtools view -h -O bam \
             | samtools sort -o {output.contigs_bam}
         samtools index {output.contigs_bam}
-        pilon -Xmx{params.pilon_mem} --threads {threads} \
+        # Pilon holds per-contig read pairs in the JVM heap. Assemblies of
+        # samples with a large non-host load (for example DNA libraries
+        # with substantial bacterial content, ~300k contigs / 140 Mb) can
+        # exceed PILON_MEM. The default path is unchanged; only when it
+        # fails is Pilon retried on contigs longer than CONTIG_LENGTH
+        # (shorter contigs are dropped by wrangle_pilon in any case). If
+        # the retry also fails, the length-filtered contigs are passed on
+        # unpolished and a warning is written to the log.
+        if ! pilon -Xmx{params.pilon_mem} --threads {threads} \
             --genome {input.contigs} --frags {output.contigs_bam} \
             --outdir {params.pilon_folder} \
             --output {wildcards.sample}_improved_contigs \
-            >> {log} 2>&1
+            >> {log} 2>&1; then
+            echo "[pilon] WARNING: Pilon failed on the full assembly;" \
+                 "retrying on contigs longer than {params.min_len} bp" >> {log}
+            FILT={params.pilon_folder}/{wildcards.sample}_filtered_contigs.fa
+            awk -v min={params.min_len} '
+                /^>/ {{ if (h != "" && length(s) > min) print h "\\n" s; h = $0; s = ""; next }}
+                {{ s = s $0 }}
+                END {{ if (h != "" && length(s) > min) print h "\\n" s }}
+            ' {input.contigs} > $FILT
+            FBAM={params.pilon_folder}/{wildcards.sample}_filtered_contigs.bam
+            bwa index -p ${{INDEX_PREFIX}}_filt $FILT >> {log} 2>&1
+            bwa mem -t {threads} ${{INDEX_PREFIX}}_filt {input.r1} {input.r2} 2>> {log} \
+                | samtools view -h -F 4 -O bam \
+                | samtools sort -o $FBAM
+            samtools index $FBAM
+            if ! pilon -Xmx{params.pilon_mem} \
+                --genome $FILT --frags $FBAM \
+                --outdir {params.pilon_folder} \
+                --output {wildcards.sample}_improved_contigs \
+                >> {log} 2>&1; then
+                echo "[pilon] WARNING: Pilon failed again; passing" \
+                     "length-filtered contigs on unpolished" >> {log}
+                cp $FILT {output.improved_contigs}
+            fi
+            rm -f $FILT $FILT.fai $FBAM $FBAM.bai
+        fi
         rm -rf {params.index_folder}
         """
 
@@ -359,12 +393,25 @@ rule checkv:
         # alongside every real HMM; CheckV mis-reads these as HMMs and
         # fails the same way. They are removed here on Darwin before
         # CheckV runs; on Linux the block is a no-op.
+        #
+        # The same problem affects CheckV's own working directory when the
+        # results folder sits on a volume without native extended-attribute
+        # support (exFAT, FAT32, some network shares): macOS writes a
+        # '._<name>' companion for every new file, and search_hmms() then
+        # reads '._N.hmmout' as hmmsearch output and fails with a
+        # UnicodeDecodeError. On Darwin CheckV therefore runs in a scratch
+        # directory under $TMPDIR (local APFS) and only the final
+        # contamination TSV is moved into the results folder. On Linux
+        # CKDIR is simply {params.folder}.
         """
+        mkdir -p {params.folder}
+
+        CKDIR={params.folder}
         if [ "$(uname)" = "Darwin" ]; then
             find {params.db} -name "._*" -delete 2>/dev/null || true
+            CKDIR=$(mktemp -d "${{TMPDIR:-/tmp}}/checkv_{wildcards.sample}_{wildcards.assembler}.XXXXXX")
+            trap 'rm -rf "$CKDIR"' EXIT
         fi
-
-        mkdir -p {params.folder}
 
         TOTAL=$(grep -c '^>' {input.contigs} || true)
         DUMMY=$(grep -c '^>DUMMY_CONTIG' {input.contigs} || true)
@@ -380,24 +427,24 @@ rule checkv:
             checkv contamination \
                 -d {params.db} \
                 {input.contigs} \
-                {params.folder} \
+                "$CKDIR" \
                 -t {threads} \
                 2> {log}
             RC=$?
             set -e
             if [ "$RC" -eq 0 ]; then
-                mv {params.folder}/contamination.tsv {output.checkv}
+                mv "$CKDIR"/contamination.tsv {output.checkv}
                 # Drop CheckV intermediates; keep the contamination TSV only.
                 # Log a warning rather than failing if a file cannot be removed.
-                ls -d -1 {params.folder}/* 2>/dev/null | grep -v .tsv \
+                ls -d -1 "$CKDIR"/* 2>/dev/null | grep -v .tsv \
                     | xargs -r rm -rf \
-                    || echo "[assembly] WARNING: CheckV cleanup incomplete in {params.folder}" >&2
+                    || echo "[assembly] WARNING: CheckV cleanup incomplete in $CKDIR" >&2
             else
                 # CheckV failed. Tolerate ONLY the no-genes case: prodigal
                 # predicted no ORFs, so proteins.faa is empty (or absent).
                 GENES=0
-                if [ -f {params.folder}/tmp/proteins.faa ]; then
-                    GENES=$(grep -c '^>' {params.folder}/tmp/proteins.faa || true)
+                if [ -f "$CKDIR"/tmp/proteins.faa ]; then
+                    GENES=$(grep -c '^>' "$CKDIR"/tmp/proteins.faa || true)
                 fi
                 if [ "${{GENES:-0}}" -gt 0 ]; then
                     echo "[checkv] CheckV failed (exit $RC) with ${{GENES}} predicted genes; this is not the benign no-genes case. See the log below." >&2
@@ -410,7 +457,7 @@ rule checkv:
         fi
 
         if [ "$SYNTHESISE" -eq 1 ]; then
-            rm -rf {params.folder}/tmp 2>/dev/null || true
+            rm -rf "$CKDIR"/tmp {params.folder}/tmp 2>/dev/null || true
             printf 'contig_id\ttotal_genes\tviral_genes\thost_genes\tprovirus\n' > {output.checkv}
             grep '^>' {input.contigs} 2>/dev/null | sed 's/^>//; s/[[:space:]].*//' \
                 | while IFS= read -r cid; do

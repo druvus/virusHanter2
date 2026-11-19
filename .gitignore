@@ -174,3 +174,8 @@ test/*.fq.gz
 .DS_Store
 config/config.drrkk*.yaml
 config/config.real_subsample.yaml
+
+# macOS AppleDouble companions. Volumes without native extended-attribute
+# support (exFAT, FAT32, some network shares) get a '._<name>' file beside
+# every new file; these confuse CheckV, grep and git's pack index.
+._*
