@@ -240,6 +240,7 @@ rule pilon:
         index_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON/bwa",
         pilon_folder=f"{RESULT_FOLDER}/{{sample}}/{{assembler}}/PILON",
         pilon_mem=PILON_MEM,
+        min_len=CONTIG_LENGTH,
     threads: THREADS
     resources:
         # PILON_MEM_MB is derived from PILON_MEM at workflow-parse time so the
@@ -260,11 +261,44 @@ rule pilon:
             | samtools view -h -O bam \
             | samtools sort -o {output.contigs_bam}
         samtools index {output.contigs_bam}
-        pilon -Xmx{params.pilon_mem} --threads {threads} \
+        # Pilon holds per-contig read pairs in the JVM heap. Assemblies of
+        # samples with a large non-host load (for example DNA libraries
+        # with substantial bacterial content, ~300k contigs / 140 Mb) can
+        # exceed PILON_MEM. The default path is unchanged; only when it
+        # fails is Pilon retried on contigs longer than CONTIG_LENGTH
+        # (shorter contigs are dropped by wrangle_pilon in any case). If
+        # the retry also fails, the length-filtered contigs are passed on
+        # unpolished and a warning is written to the log.
+        if ! pilon -Xmx{params.pilon_mem} --threads {threads} \
             --genome {input.contigs} --frags {output.contigs_bam} \
             --outdir {params.pilon_folder} \
             --output {wildcards.sample}_improved_contigs \
-            >> {log} 2>&1
+            >> {log} 2>&1; then
+            echo "[pilon] WARNING: Pilon failed on the full assembly;" \
+                 "retrying on contigs longer than {params.min_len} bp" >> {log}
+            FILT={params.pilon_folder}/{wildcards.sample}_filtered_contigs.fa
+            awk -v min={params.min_len} '
+                /^>/ {{ if (h != "" && length(s) > min) print h "\\n" s; h = $0; s = ""; next }}
+                {{ s = s $0 }}
+                END {{ if (h != "" && length(s) > min) print h "\\n" s }}
+            ' {input.contigs} > $FILT
+            FBAM={params.pilon_folder}/{wildcards.sample}_filtered_contigs.bam
+            bwa index -p ${{INDEX_PREFIX}}_filt $FILT >> {log} 2>&1
+            bwa mem -t {threads} ${{INDEX_PREFIX}}_filt {input.r1} {input.r2} 2>> {log} \
+                | samtools view -h -F 4 -O bam \
+                | samtools sort -o $FBAM
+            samtools index $FBAM
+            if ! pilon -Xmx{params.pilon_mem} \
+                --genome $FILT --frags $FBAM \
+                --outdir {params.pilon_folder} \
+                --output {wildcards.sample}_improved_contigs \
+                >> {log} 2>&1; then
+                echo "[pilon] WARNING: Pilon failed again; passing" \
+                     "length-filtered contigs on unpolished" >> {log}
+                cp $FILT {output.improved_contigs}
+            fi
+            rm -f $FILT $FILT.fai $FBAM $FBAM.bai
+        fi
         rm -rf {params.index_folder}
         """
 
