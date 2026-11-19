@@ -217,7 +217,7 @@ is the basename of `SAMPLES`.
 | `per_virus_<batch>.csv` | concatenation of every per-sample per-virus CSV. |
 | `software_versions.tsv` | conda-resolved version of every tool that ran. |
 | `run_provenance_<batch>.json` (+ `.tsv`) | reference database build identities + tool versions; rendered as the report's Provenance tab (see [PROVENANCE.md](PROVENANCE.md)). |
-| `multiqc_report.html` + `multiqc_data/` | run-level QC dashboard. |
+| `multiqc_report.html` + `multiqc_report_data/` | run-level QC dashboard. |
 | `analysis_done.txt` | sentinel when `CLEAN: "TRUE"`. |
 
 ### Combining multiple Illumina runs

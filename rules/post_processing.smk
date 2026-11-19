@@ -352,7 +352,8 @@ rule multiqc:
         ),
     output:
         html=f"{RESULT_FOLDER}/multiqc_report.html",
-        data=directory(f"{RESULT_FOLDER}/multiqc_data"),
+        # MultiQC names the data directory after --filename (<stem>_data).
+        data=directory(f"{RESULT_FOLDER}/multiqc_report_data"),
     params:
         results_folder=RESULT_FOLDER,
     resources:
