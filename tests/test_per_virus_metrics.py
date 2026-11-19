@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.per_virus_metrics import (  # noqa: E402
     attribute_contigs,
+    best_reference_coverage,
+    blast_accession_base,
     build_per_virus_rows,
     kaiju_lookup,
     kraken_viral_top_n,
@@ -702,3 +704,122 @@ def test_read_virus_parquet_taxids_falls_back_when_column_absent(tmp_path):
     out = read_virus_parquet_taxids(p)
     assert "name" in out.columns  # did not raise; fell back to full read
     assert "sequence" in out.columns
+
+
+# ---------------------------------------------------------------------------
+# Species-level matching (taxdump) and legacy BLAST subject ids
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "accession, expected",
+    [
+        ("gi|30271926|ref|NC_004718.3|", "NC_004718"),
+        ("gi|123|gb|MN908947.3|", "MN908947"),
+        ("NC_004718.3", "NC_004718"),
+        ("NC_004718", "NC_004718"),
+    ],
+)
+def test_blast_accession_base_handles_legacy_seqids(accession, expected):
+    assert blast_accession_base(accession) == expected
+
+
+def test_build_per_virus_rows_matches_strain_references_at_species_level():
+    # Kraken reports the species (taxid 100); the references and the
+    # Kaiju hit sit on strain-level taxids 101 and 102, as in NCBI's
+    # current taxonomy (e.g. Betacoronavirus pandemicum 3418604 vs
+    # SARS Tor2 227984 and SARS-CoV-2 2697049).
+    kraken = _kraken_df(
+        [
+            (10.0, 1000, 1000, "R1", 10239, "Viruses", "Viruses"),
+            (90.0, 900, 10, "S", 100, "Virus species", "Viruses"),
+        ]
+    )
+    kaiju = pd.DataFrame(
+        {
+            "file": ["a"],
+            "percent": [50.0],
+            "reads": [500],
+            "taxon_id": [101],
+            "taxon_name": ["Virus species"],
+        }
+    )
+    blastn = pd.DataFrame(
+        {
+            "name": ["contig_1", "contig_2"],
+            "match_name": ["strain one, complete genome", "strain one fragment"],
+            "accession": ["gi|1|ref|NC_101.1|", "NC_101.1"],
+            "assembler": ["MEGAHIT", "rnaviralSPAdes"],
+        }
+    )
+    parquet = pd.DataFrame(
+        {"name": ["NC_101.1", "NC_102.1"], "tax_id": [101, 102]}
+    )
+    summary = {
+        "NC_101.1": {"length": 1000, "bases": 50000, "mean": 50.0},
+        "NC_102.1": {"length": 1000, "bases": 300, "mean": 0.3},
+    }
+    thresholds = {
+        "NC_101.1": {"bases_ge_1x": 1000, "bases_ge_5x": 990, "bases_ge_10x": 980},
+        "NC_102.1": {"bases_ge_1x": 200, "bases_ge_5x": 0, "bases_ge_10x": 0},
+    }
+    common = dict(
+        run_name="261112_X",
+        sample_name="s1",
+        kraken_df=kraken,
+        kaiju_df=kaiju,
+        blastn_df=blastn,
+        parquet_df=parquet,
+        summary=summary,
+        thresholds=thresholds,
+        total_reads=10000,
+        human_reads=0,
+        assemblers=["MEGAHIT", "rnaviralSPAdes"],
+    )
+
+    # Without the taxdump map the species row finds no evidence.
+    old = build_per_virus_rows(**common).iloc[0]
+    assert old["contigs"] == 0
+    assert old["mean_coverage"] == 0.0
+    assert "coverage_reference" not in old.index
+
+    row = build_per_virus_rows(
+        **common, species_of={100: 100, 101: 100, 102: 100}
+    ).iloc[0]
+    assert row["virus_taxid"] == 100
+    assert row["contigs"] == 2
+    assert row["megahit_contigs"] == 1
+    assert row["rnaviralspades_contigs"] == 1
+    # Coverage is taken from the best-covered strain reference only,
+    # not diluted by the length of the other strain's reference.
+    assert row["coverage_reference"] == "NC_101.1"
+    assert row["mean_coverage"] == 50.0
+    assert abs(row["Completeness (% >5X)"] - 99.0) < 1e-9
+    assert row["virus_name_kaiju"] == "Virus species"
+    assert row["note"] == ""
+
+
+def test_best_reference_coverage_sums_segments_of_one_taxid():
+    parquet_buckets = {
+        1: [{"chrom": "SEG_A", "base_accession": "SEG_A"},
+            {"chrom": "SEG_B", "base_accession": "SEG_B"}],
+        2: [{"chrom": "OTHER", "base_accession": "OTHER"}],
+    }
+    summary = {
+        "SEG_A": {"length": 100, "bases": 1000, "mean": 10.0},
+        "SEG_B": {"length": 300, "bases": 3000, "mean": 10.0},
+        "OTHER": {"length": 400, "bases": 400, "mean": 1.0},
+    }
+    thresholds = {
+        "SEG_A": {"bases_ge_5x": 100},
+        "SEG_B": {"bases_ge_5x": 300},
+        "OTHER": {"bases_ge_5x": 0},
+    }
+    length, bases, ge5x, chroms = best_reference_coverage(
+        [2, 1], parquet_buckets, summary, thresholds
+    )
+    assert (length, bases, ge5x) == (400, 4000, 400)
+    assert chroms == ["SEG_A", "SEG_B"]
+    assert best_reference_coverage([3], parquet_buckets, summary, thresholds) == (
+        0, 0, 0, []
+    )

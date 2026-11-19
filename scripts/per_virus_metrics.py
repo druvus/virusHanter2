@@ -221,6 +221,32 @@ def mosdepth_thresholds_table(thresholds_bed_gz: Path) -> dict[str, dict[str, in
     return out
 
 
+_SEQID_DB_TAGS: frozenset[str] = frozenset(
+    {"ref", "gb", "emb", "dbj", "tpg", "tpe", "tpd", "gi", "lcl"}
+)
+
+
+def blast_accession_base(accession: str) -> str:
+    """Return the version-less accession from a BLAST subject id.
+
+    BLAST databases built with legacy NCBI identifiers report subjects
+    as ``gi|30271926|ref|NC_004718.3|``; plain ids such as
+    ``NC_004718.3`` pass through. ``gi|...|ref|NC_004718.3|`` and
+    ``NC_004718.3`` both return ``NC_004718``.
+    """
+    acc = str(accession).strip()
+    if "|" in acc:
+        fields = [f for f in acc.split("|") if f]
+        # The accession follows the database tag (ref, gb, emb, ...).
+        for i, f in enumerate(fields[:-1]):
+            if f in _SEQID_DB_TAGS and f != "gi":
+                acc = fields[i + 1]
+                break
+        else:
+            acc = fields[-1] if fields else acc
+    return acc.split(".")[0]
+
+
 def attribute_contigs(
     blastn_df: pd.DataFrame,
     parquet_acc_to_tax: dict[str, int],
@@ -241,7 +267,7 @@ def attribute_contigs(
         # Tier 1: accession lookup.
         accession = getattr(row, "accession", None)
         if accession is not None and not pd.isna(accession):
-            base = str(accession).split(".")[0]
+            base = blast_accession_base(str(accession))
             tid = parquet_acc_to_tax.get(base) or parquet_acc_to_tax.get(
                 str(accession)
             )
@@ -261,6 +287,44 @@ def attribute_contigs(
                 "" if contig is None or pd.isna(contig) else str(contig)
             )
     return by_taxid
+
+
+def best_reference_coverage(
+    candidate_tids: list[int],
+    parquet_buckets: dict[int, list[dict]],
+    summary: dict[str, dict[str, float]],
+    thresholds: dict[str, dict[str, int]],
+) -> tuple[int, int, int, list[str]]:
+    """Return ``(length, bases, bases_ge_5x, chroms)`` for the reference
+    tax_id with the highest 5X breadth among ``candidate_tids``.
+
+    References that share a tax_id (segments of one genome) are summed;
+    different tax_ids of one species (strains, isolates) are compared and
+    only the best-covered one is reported, so that a sample carrying one
+    strain is not diluted by the length of other strains' references.
+    Ties on breadth are broken by aligned bases. Returns zeros and an
+    empty list when no candidate has a reference in the mosdepth summary.
+    """
+    best: tuple[float, int, int, int, int, list[str]] | None = None
+    for tid in candidate_tids:
+        length = bases = ge5x = 0
+        chroms: list[str] = []
+        for ref in parquet_buckets.get(tid, []):
+            s = summary.get(ref["chrom"])
+            if s is None:
+                continue
+            length += int(s["length"])
+            bases += int(s["bases"])
+            ge5x += int(thresholds.get(ref["chrom"], {}).get("bases_ge_5x", 0))
+            chroms.append(ref["chrom"])
+        if length == 0:
+            continue
+        key = (ge5x / length, bases, length, bases, ge5x, chroms)
+        if best is None or key[:2] > best[:2]:
+            best = key
+    if best is None:
+        return 0, 0, 0, []
+    return best[2], best[3], best[4], best[5]
 
 
 def _per_row_note(
@@ -366,9 +430,20 @@ def build_per_virus_rows(
     top_n: int = 20,
     genomad_summary: dict[str, float] | None = None,
     assemblers: list[str] | None = None,
+    species_of: dict[int, int] | None = None,
 ) -> pd.DataFrame:
     """Top-level join. Returns a DataFrame with the schema documented in
     `docs/PER_VIRUS_OUTPUT.md`.
+
+    ``species_of`` optionally maps tax_ids to their species-rank ancestor
+    (built from the NCBI taxdump). When supplied, a Kraken row is joined
+    to coverage, contigs and Kaiju evidence of every tax_id in the same
+    species, not only its exact tax_id. Without it, Kraken species
+    taxids (for example 3418604, Betacoronavirus pandemicum) do not
+    match the strain-level tax_ids of the reference genomes (227984,
+    2697049) and the row reports zero contigs and zero coverage. The
+    reference used for coverage is then reported in the trailing
+    ``coverage_reference`` column.
     """
     viral = kraken_viral_top_n(kraken_df, top_n=top_n)
 
@@ -401,6 +476,30 @@ def build_per_virus_rows(
     kaiju_by_tid = kaiju_lookup(kaiju_df)
     taxid_to_name = {int(r.taxonomy_id): r.name for r in viral.itertuples()}
     contigs_by_taxid = attribute_contigs(blastn_df, parquet_acc_to_tax, taxid_to_name)
+
+    def _sp(tid: int) -> int:
+        # Species ancestor, or the tax_id itself when unknown.
+        if not species_of:
+            return tid
+        return species_of.get(tid) or tid
+
+    # Species-level indexes; only populated when a taxdump is supplied.
+    parquet_tids_by_species: dict[int, list[int]] = {}
+    contigs_by_species: dict[int, list[str]] = {}
+    kaiju_by_species: dict[int, dict[str, object]] = {}
+    if species_of:
+        for ptid in parquet_buckets:
+            parquet_tids_by_species.setdefault(_sp(ptid), []).append(ptid)
+        for ctid, names in contigs_by_taxid.items():
+            bucket = contigs_by_species.setdefault(_sp(ctid), [])
+            for n in names:
+                if n not in bucket:
+                    bucket.append(n)
+        for ktid, krow in kaiju_by_tid.items():
+            sp = _sp(ktid)
+            prev = kaiju_by_species.get(sp)
+            if prev is None or int(krow["reads"]) > int(prev["reads"]):
+                kaiju_by_species[sp] = krow
 
     # Map contig name -> assembler so we can split per-taxid contig
     # counts by assembler without re-walking the BLAST CSV. When
@@ -438,19 +537,29 @@ def build_per_virus_rows(
     for v in viral.itertuples():
         taxid = int(v.taxonomy_id)
         virus_reads_kraken = int(v.count_clades)
-        # Aggregate mosdepth across all references for this taxid.
-        total_length = 0
-        total_bases = 0
-        total_ge5x = 0
-        for ref in parquet_buckets.get(taxid, []):
-            chrom = ref["chrom"]
-            s = summary.get(chrom)
-            if s is None:
-                continue
-            total_length += int(s["length"])
-            total_bases += int(s["bases"])
-            t = thresholds.get(chrom, {})
-            total_ge5x += int(t.get("bases_ge_5x", 0))
+        coverage_chroms: list[str] = []
+        if species_of:
+            # Best-covered reference tax_id within the Kraken species.
+            candidates = [taxid] + [
+                t for t in parquet_tids_by_species.get(_sp(taxid), []) if t != taxid
+            ]
+            total_length, total_bases, total_ge5x, coverage_chroms = (
+                best_reference_coverage(candidates, parquet_buckets, summary, thresholds)
+            )
+        else:
+            # Aggregate mosdepth across all references for this taxid.
+            total_length = 0
+            total_bases = 0
+            total_ge5x = 0
+            for ref in parquet_buckets.get(taxid, []):
+                chrom = ref["chrom"]
+                s = summary.get(chrom)
+                if s is None:
+                    continue
+                total_length += int(s["length"])
+                total_bases += int(s["bases"])
+                t = thresholds.get(chrom, {})
+                total_ge5x += int(t.get("bases_ge_5x", 0))
         mean_cov = total_bases / total_length if total_length > 0 else 0.0
         # Completeness reported as a percent (0-100), matching the
         # convention of the human_reads_percent / non_human_reads_percent
@@ -465,9 +574,15 @@ def build_per_virus_rows(
             virus_reads_kraken * 1_000_000.0 / total_reads if total_reads > 0 else 0.0
         )
 
-        kaiju_row = kaiju_by_tid.get(taxid, {})
+        kaiju_row = kaiju_by_tid.get(taxid) or kaiju_by_species.get(_sp(taxid), {})
         kaiju_name = str(kaiju_row.get("taxon_name", "") or "")
-        attributed_contigs = contigs_by_taxid.get(taxid, [])
+        if species_of:
+            attributed_contigs = list(contigs_by_species.get(_sp(taxid), []))
+            for n in contigs_by_taxid.get(taxid, []):
+                if n not in attributed_contigs:
+                    attributed_contigs.append(n)
+        else:
+            attributed_contigs = contigs_by_taxid.get(taxid, [])
 
         row_note = _per_row_note(
             sample_note=sample_note,
@@ -524,6 +639,9 @@ def build_per_virus_rows(
             ]
             row["genomad_viral_contigs"] = len(matched)
             row["genomad_max_virus_score"] = max(matched) if matched else np.nan
+        if species_of is not None:
+            # Trailing column: reference(s) the coverage figures refer to.
+            row["coverage_reference"] = ";".join(coverage_chroms)
         rows.append(row)
     df = pd.DataFrame(rows)
     if df.empty:
@@ -594,8 +712,42 @@ def parse_args() -> argparse.Namespace:
             "genomad_max_virus_score) are appended to the per-virus CSV."
         ),
     )
+    p.add_argument(
+        "--taxdump-nodes",
+        type=Path,
+        default=None,
+        help=(
+            "Optional NCBI nodes.dmp. When supplied, Kraken rows are "
+            "matched to references, contigs and Kaiju hits at species "
+            "level, and a trailing coverage_reference column is added."
+        ),
+    )
     p.add_argument("--out", required=True, type=Path)
     return p.parse_args()
+
+
+def build_species_map(
+    nodes_path: Path,
+    taxids: set[int],
+) -> dict[int, int]:
+    """Map each tax_id in ``taxids`` to its species-rank ancestor using
+    ``nodes.dmp``. Tax_ids without a species ancestor are left out.
+    """
+    # functions.py imports sibling modules as `scripts.*`, so the
+    # repository root has to be importable.
+    import sys
+
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from scripts.functions import find_species_taxid, parse_nodes_dmp
+    nodes = parse_nodes_dmp(nodes_path)
+    out: dict[int, int] = {}
+    for tid in taxids:
+        sp = find_species_taxid(int(tid), nodes)
+        if sp:
+            out[int(tid)] = sp
+    return out
 
 
 def main() -> None:
@@ -653,6 +805,22 @@ def main() -> None:
     else:
         genomad_summary = None
 
+    species_of: dict[int, int] | None = None
+    if args.taxdump_nodes is not None and args.taxdump_nodes.exists():
+        wanted: set[int] = set()
+        for col, frame in (("tax_id", parquet_df), ("taxonomy_id", kraken_df)):
+            if col in frame.columns:
+                wanted.update(
+                    int(t)
+                    for t in pd.to_numeric(frame[col], errors="coerce").dropna()
+                )
+        if "taxon_id" in kaiju_df.columns:
+            wanted.update(
+                int(t)
+                for t in pd.to_numeric(kaiju_df["taxon_id"], errors="coerce").dropna()
+            )
+        species_of = build_species_map(args.taxdump_nodes, wanted)
+
     df = build_per_virus_rows(
         run_name=args.run_name,
         sample_name=args.sample_name,
@@ -667,6 +835,7 @@ def main() -> None:
         top_n=args.top_n,
         genomad_summary=genomad_summary,
         assemblers=declared_assemblers if declared_assemblers else None,
+        species_of=species_of,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)

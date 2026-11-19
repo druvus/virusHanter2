@@ -47,6 +47,7 @@ existing consumers because they read the CSV by column name.
 | `<assembler>_contigs` | One column per active entry in `config[ASSEMBLERS]`. Count of BLASTN-merged contigs attributed to this taxid **for that assembler**. Sums to `contigs` across assemblers. |
 | `genomad_viral_contigs` | When `GENOMAD: "TRUE"`: count of attributed contigs geNomad called viral. |
 | `genomad_max_virus_score` | When `GENOMAD: "TRUE"`: highest geNomad `virus_score` among the attributed contigs. |
+| `coverage_reference` | When `TAXDUMP_NODES` is set: the reference accession(s) the coverage columns refer to (`;`-separated for segmented genomes). Empty when no reference of the species was in the coverage BAM. |
 
 A virus that is in the Kraken top-N but has no aligned reads ends up
 with `bases_above_5x = 0`, `Completeness (% >5X) = 0`, `mean_coverage = 0`.
@@ -62,6 +63,33 @@ per-virus row aggregates across them:
 - `bases_above_5x` = sum across references.
 - `mean_coverage` = `sum(bases_aligned) / sum(reference_length)`.
 - `Completeness (% >5X)` = `100 * bases_above_5x / sum(reference_length)`.
+
+## Species-level matching (`TAXDUMP_NODES`)
+
+Kraken2 usually reports a virus at species rank, whereas the RefSeq
+references in `VIRUS_PARQUET` and the BLAST subjects often carry a
+strain- or isolate-level tax_id below it (for example Kraken2
+*Betacoronavirus pandemicum* 3418604 against the references for SARS
+coronavirus Tor2, 227984, and SARS-CoV-2, 2697049). An exact tax_id
+join then reports zero contigs and zero coverage for a virus that was
+assembled in full.
+
+When `TAXDUMP_NODES` is configured, every tax_id is resolved to its
+species-rank ancestor through `nodes.dmp` and the join is made at
+species level:
+
+- Contigs: all BLAST hits whose reference resolves to the same species
+  are attributed to the Kraken row. BLAST subject ids in the legacy
+  `gi|...|ref|ACCESSION|` form are reduced to the accession first.
+- Coverage: the references are grouped by tax_id (segments of one
+  genome are summed as above) and the tax_id with the highest 5X
+  breadth is reported, ties broken by aligned bases. Strains are not
+  summed, so a sample carrying one strain is not diluted by the length
+  of the others. The chosen reference is given in `coverage_reference`.
+- Kaiju: an exact tax_id match is used when present, otherwise the
+  Kaiju hit with the most reads within the same species.
+
+Without `TAXDUMP_NODES` the exact tax_id join is used, as before.
 
 ## Per-batch concatenation
 
